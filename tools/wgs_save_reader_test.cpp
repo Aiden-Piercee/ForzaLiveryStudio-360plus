@@ -196,6 +196,19 @@ void testSyntheticSave() {
     require(groupAsset->containerName == group.name, "group name mismatch");
     require(QFileInfo(groupAsset->payloadPath).fileName() == guidName(group.files[0].second),
             "group payload GUID mismatch");
+
+    const QString liveryContainerPath = root.filePath(guidName(livery.guid));
+    require(fls::isWgsContainerDirectory(liveryContainerPath),
+            "direct WGS container was not recognized");
+    const fls::WgsAsset directAsset = fls::readWgsContainer(liveryContainerPath);
+    require(directAsset.containerName == guidName(livery.guid),
+            "direct WGS container name mismatch");
+    require(directAsset.kind == fls::WgsAssetKind::Livery,
+            "direct WGS container kind mismatch");
+    require(QFileInfo(directAsset.payloadPath).fileName() == guidName(livery.files[0].second),
+            "direct WGS payload GUID mismatch");
+    require(!directAsset.headerPath.isEmpty(), "direct WGS header missing");
+    require(!directAsset.thumbnailPath.isEmpty(), "direct WGS thumbnail missing");
 }
 
 void testGroupExportOwnershipMetadata() {

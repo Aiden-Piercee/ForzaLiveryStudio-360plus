@@ -259,3 +259,21 @@ walkers.
 `readFM2023LiveryPayload()` reconstructs the tagged stream and extracts its
 artwork and counters. `decodeFM2023LiverySections()` builds the section trees, and
 `importFM2023Asset()` converts them to the editor scene.
+
+## Native Export Targets
+
+The PGS exporter selects the tagged envelope, artwork section count, counters,
+paint layout, header version, and compression framing for the destination game.
+FH6 retains its eleven artwork sections and hashed paint descriptors. FH5 writes
+five artwork sections and seven counters. Motorsport writes seven artwork sections
+and seven counters, wrapped in independently compressed blocks of at most 32768
+uncompressed bytes.
+
+FH5 and Motorsport use a positional paint chunk containing a status byte,
+34 fixed-size 40-byte records, and a two-byte tail. Imported native chunks are
+retained intact. New artwork-only projects receive inherited paint records;
+edited hashed paint bindings require a positional mapping and are rejected.
+The exporter validates target section availability before writing the asset.
+Native artwork retains its framing when the scene hierarchy remains compatible;
+placement and color edits are patched relative to the retained group transforms.
+Rebuilt artwork is decoded and checked against the scene before export.

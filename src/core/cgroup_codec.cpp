@@ -67,7 +67,7 @@ QByteArray readCGroupPayload(const QString &folderOrFile) {
     return inflateContainer(file.readAll());
 }
 
-void writeCGroupFile(const QString &path, const QByteArray &payload) {
+QByteArray deflateContainer(const QByteArray &payload) {
     uLongf bound = compressBound(static_cast<uLong>(payload.size()));
     QByteArray compressed;
     compressed.resize(static_cast<int>(bound));
@@ -85,6 +85,12 @@ void writeCGroupFile(const QString &path, const QByteArray &payload) {
     appendLeU32(wrapped, static_cast<quint32>(compressed.size()));
     appendLeU32(wrapped, static_cast<quint32>(payload.size()));
     wrapped.append(compressed);
+
+    return wrapped;
+}
+
+void writeCGroupFile(const QString &path, const QByteArray &payload) {
+    const QByteArray wrapped = deflateContainer(payload);
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core_types.h"
+#include "game_export.h"
+#include "wgs_save_writer.h"
 #include "editor_state.h"
 #include "layer_tree_model.h"
 #include "layer_tree_view.h"
@@ -108,7 +110,8 @@ private:
     void applyLiverySectionVisibility(const QString &sectionGroupId);
     void updateCarUnwrapOverlay();
     void exportDialog();
-    bool exportFolderImpl(const QString &folder, QString *error);
+    bool exportFolderImpl(const QString &folder, fls::ExportGameVersion game, QString *error,
+                          const fls::WgsExportTarget *wgsTarget = nullptr);
     void setTargetCarDialog();
     void newProjectDialog();
     void saveProjectJsonDialog();

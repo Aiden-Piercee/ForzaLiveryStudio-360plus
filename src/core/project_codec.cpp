@@ -227,6 +227,12 @@ QJsonObject headerMetadataToJson(const HeaderMetadata &meta) {
     object.insert(QStringLiteral("creator_tag"), toBase64(meta.creatorTag));
     object.insert(QStringLiteral("creator_name"), meta.creatorName);
     object.insert(QStringLiteral("section_prefix"), toBase64(meta.sectionPrefix));
+    object.insert(QStringLiteral("section_padding"), toBase64(meta.sectionPadding));
+    object.insert(QStringLiteral("section_marker"), toBase64(meta.sectionMarker));
+    if (meta.category) {
+        object.insert(QStringLiteral("category"), static_cast<qint64>(*meta.category));
+    }
+    object.insert(QStringLiteral("has_car_id"), meta.hasCarId);
     object.insert(QStringLiteral("type_value"), static_cast<qint64>(meta.typeValue));
     object.insert(QStringLiteral("car_id"), static_cast<qint64>(meta.carId));
     object.insert(QStringLiteral("guid"), toBase64(meta.guid));
@@ -248,6 +254,14 @@ HeaderMetadata headerMetadataFromJson(const QJsonObject &object) {
     meta.creatorTag = QByteArray::fromBase64(object.value(QStringLiteral("creator_tag")).toString().toLatin1());
     meta.creatorName = object.value(QStringLiteral("creator_name")).toString();
     meta.sectionPrefix = QByteArray::fromBase64(object.value(QStringLiteral("section_prefix")).toString().toLatin1());
+    meta.sectionPadding = QByteArray::fromBase64(object.value(QStringLiteral("section_padding")).toString().toLatin1());
+    if (object.contains(QStringLiteral("section_marker"))) {
+        meta.sectionMarker = QByteArray::fromBase64(object.value(QStringLiteral("section_marker")).toString().toLatin1());
+    }
+    if (object.contains(QStringLiteral("category"))) {
+        meta.category = static_cast<quint32>(object.value(QStringLiteral("category")).toInteger());
+    }
+    meta.hasCarId = object.value(QStringLiteral("has_car_id")).toBool(true);
     meta.typeValue = static_cast<quint32>(object.value(QStringLiteral("type_value")).toInt(0));
     meta.carId = static_cast<quint32>(object.value(QStringLiteral("car_id")).toInt(0));
     meta.guid = QByteArray::fromBase64(object.value(QStringLiteral("guid")).toString().toLatin1());
@@ -1011,8 +1025,6 @@ Project decodeProjectDocument(const QByteArray &fileBytes) {
     return projectFromJson(document.object());
 }
 
-namespace {
-
 QByteArray creatorTagFromSavePath(const QString &path) {
     QString currentPath = QFileInfo(path).absoluteFilePath();
     while (!currentPath.isEmpty()) {
@@ -1042,6 +1054,8 @@ QByteArray creatorTagFromSavePath(const QString &path) {
 
     return {};
 }
+
+namespace {
 
 quint64 exportedShapeCount(const scene::Layer &node) {
     if (!node.visible) {
@@ -1100,6 +1114,10 @@ QByteArray buildGroupHeader(const Project &project, const QString &outputName,
     }
 
     metadata->name = outputName;
+    metadata->formatVersion = kCurrentHeaderFormatVersion;
+    metadata->sectionMarker = QByteArray("\x01\x02", 2);
+    metadata->sectionPadding = QByteArray(7, '\0');
+    metadata->hasCarId = true;
     metadata->typeValue = exportedGroupShapeCount(project);
     const QByteArray destinationCreatorTag = creatorTagFromSavePath(outputFolder);
     if (!destinationCreatorTag.isEmpty()) {
@@ -1324,6 +1342,9 @@ QByteArray buildLiveryHeader(const Project &project, const QVector<int> &section
             metadata.year = project.headerMetadata->year;
         }
         metadata.formatVersion = kCurrentHeaderFormatVersion;
+        metadata.sectionMarker = QByteArray("\x01\x02", 2);
+        metadata.sectionPadding = QByteArray(7, '\0');
+        metadata.hasCarId = true;
         metadata.name = project.name;
         metadata.carId = static_cast<quint32>(project.carId);
         metadata.typeValue = decalCount;
@@ -1334,6 +1355,9 @@ QByteArray buildLiveryHeader(const Project &project, const QVector<int> &section
     if (project.headerMetadata) {
         HeaderMetadata metadata = *project.headerMetadata;
         metadata.formatVersion = kCurrentHeaderFormatVersion;
+        metadata.sectionMarker = QByteArray("\x01\x02", 2);
+        metadata.sectionPadding = QByteArray(7, '\0');
+        metadata.hasCarId = true;
         metadata.name = project.name;
         metadata.carId = static_cast<quint32>(project.carId);
         metadata.typeValue = decalCount;

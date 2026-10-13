@@ -26,5 +26,7 @@ struct WgsSave {
 
 bool isWgsSaveDirectory(const QString &path);
 WgsSave readWgsSave(const QString &path);
+bool isWgsContainerDirectory(const QString &path);
+WgsAsset readWgsContainer(const QString &path);
 
 } // namespace fls

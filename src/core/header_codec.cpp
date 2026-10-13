@@ -93,14 +93,30 @@ HeaderMetadata parseHeader(const QByteArray &bytes) {
         throw std::runtime_error("header truncated before sec3 marker");
     }
     offset += PaddingBeforeSec3;
-    if (!detail::bytesAt(bytes, offset, {0x01, 0x02})) {
+    const bool legacyHeader = meta.formatVersion == 4 || meta.formatVersion == 6;
+    const bool motorsportHeader = meta.formatVersion == 9;
+    const int sectionPaddingSize = legacyHeader && meta.sectionPrefix != QByteArray(PaddingBeforeSec3, '\0') ? 3 : 7;
+    if (offset + 2 + sectionPaddingSize > bytes.size()
+        || static_cast<quint8>(bytes.at(offset)) != 1
+        || ((motorsportHeader || legacyHeader)
+                ? static_cast<quint8>(bytes.at(offset + 1)) > 2
+                : static_cast<quint8>(bytes.at(offset + 1)) != 2)) {
         throw std::runtime_error("header sec3 marker not found at expected offset");
     }
-    offset += 9;
+    meta.sectionMarker = bytes.mid(offset, 2);
+    meta.sectionPadding = bytes.mid(offset + 2, sectionPaddingSize);
+    offset += 2 + sectionPaddingSize;
+    if (motorsportHeader) {
+        meta.category = detail::readLeU32(bytes, offset);
+        offset += 4;
+    }
     meta.typeValue = detail::readLeU32(bytes, offset);
     offset += 4;
-    meta.carId = detail::readLeU32(bytes, offset);
-    offset += 4;
+    meta.hasCarId = !legacyHeader || bytes.size() - offset >= GuidSize + 4;
+    if (meta.hasCarId) {
+        meta.carId = detail::readLeU32(bytes, offset);
+        offset += 4;
+    }
 
     meta.guid = bytes.mid(offset, GuidSize);
     if (meta.guid.size() != GuidSize) {
@@ -180,11 +196,21 @@ QByteArray buildHeader(const HeaderMetadata &meta) {
     QByteArray sectionPrefix = meta.sectionPrefix.left(PaddingBeforeSec3);
     sectionPrefix.append(QByteArray(PaddingBeforeSec3 - sectionPrefix.size(), '\0'));
     out.append(sectionPrefix);
-    out.append('\x01');
-    out.append('\x02');
-    out.append(QByteArray(7, '\0'));
+    out.append(meta.sectionMarker.isEmpty()
+        ? (meta.formatVersion == 4 ? QByteArray("\x01\x01", 2) : QByteArray("\x01\x02", 2))
+        : meta.sectionMarker);
+    const int sectionPaddingSize = meta.sectionPadding.isEmpty()
+        ? (meta.formatVersion == 4 ? 3 : 7) : static_cast<int>(meta.sectionPadding.size());
+    QByteArray sectionPadding = meta.sectionPadding.left(sectionPaddingSize);
+    sectionPadding.append(QByteArray(sectionPaddingSize - sectionPadding.size(), '\0'));
+    out.append(sectionPadding);
+    if (meta.formatVersion == 9) {
+        detail::appendLeU32(out, meta.category.value_or(0));
+    }
     detail::appendLeU32(out, meta.typeValue);
-    detail::appendLeU32(out, meta.carId);
+    if (meta.hasCarId) {
+        detail::appendLeU32(out, meta.carId);
+    }
 
     QByteArray guid = meta.guid;
     if (guid.isEmpty()) {

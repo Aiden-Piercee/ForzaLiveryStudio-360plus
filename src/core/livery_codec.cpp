@@ -2,6 +2,7 @@
 
 #include "binary_io.h"
 #include "cgroup_codec.h"
+#include "fm_codec.h"
 #include "layer.h"
 #include "matrix_math.h"
 #include "vinyl_decoder.h"
@@ -1032,6 +1033,136 @@ QByteArray packLiveryGroupTransform(const scene::Transform2D &transform, const Q
     return out;
 }
 
+bool groupStructureMatchesSource(const scene::Group &group) {
+    QVector<QString> children;
+    for (const auto &child : group.children) {
+        if (child->kind() == scene::LayerKind::Guide) {
+            continue;
+        }
+        children.append(child->id);
+        if (child->kind() == scene::LayerKind::Group
+            && !groupStructureMatchesSource(static_cast<const scene::Group &>(*child))) {
+            return false;
+        }
+    }
+
+    return children == group.sourceChildren;
+}
+
+bool nativeArtworkMatchesSource(
+    const SourceLivery &source,
+    const std::array<const scene::Group *, kLiverySectionCount> &groups,
+    const std::array<QVector<const scene::Shape *>, kLiverySectionCount> &shapes,
+    int sectionCount) {
+    const bool motorsportSource = source.payload.gyvlOffset >= 66;
+    if (motorsportSource != (sectionCount == kFM2023SectionCount)
+        || source.payload.sectionCounts.size() != sectionCount) {
+        return false;
+    }
+    for (int slot = 0; slot < sectionCount; ++slot) {
+        const LiverySection *section = sourceSection(&source, slot);
+        if (section == nullptr || decodedGroupHasSkippedChildren(section->subtree)) {
+            return false;
+        }
+        const QVector<SourceShapeView> original = sourceSectionShapes(*section);
+        if (original.size() != shapes[slot].size()
+            || (groups[slot] != nullptr && !groupStructureMatchesSource(*groups[slot]))) {
+            return false;
+        }
+        for (int index = 0; index < original.size(); ++index) {
+            SourceShapeView shape = original[index];
+            shape.mask = shape.mask && !hasColorData(shape.color);
+            const scene::Shape &current = *shapes[slot][index];
+            if (current.shapeId != shape.shapeId || current.raster != shape.raster
+                || current.rasterId != shape.rasterId || current.mask != shape.mask
+                || current.absOffset != shape.absPos) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+QByteArray patchNativeArtwork(
+    const Project &project, const SourceLivery &source,
+    const std::array<QVector<const scene::Shape *>, kLiverySectionCount> &shapes,
+    int sectionCount) {
+    const int offset = source.payload.gyvlOffset;
+    QByteArray artwork = project.liverySource.mid(offset, detail::readLeU32(project.liverySource, offset - 4));
+    for (int slot = 0; slot < sectionCount; ++slot) {
+        const QVector<SourceShapeView> original = sourceSectionShapes(*sourceSection(&source, slot));
+        const Matrix3 canvasInverse = invertAffine(liverySectionCanvasTransform(slot));
+        for (int index = 0; index < original.size(); ++index) {
+            const SourceShapeView &sourceShape = original[index];
+            const scene::Shape &current = *shapes[slot][index];
+            const Matrix3 currentWorld = current.worldMatrix();
+            const Matrix3 cachedWorld = current.sourceTransform.matrix();
+            bool unchanged = current.hasSourceTransform && current.color == sourceShape.color;
+            for (int row = 0; row < 3; ++row) {
+                for (int column = 0; column < 3; ++column) {
+                    unchanged = unchanged && currentWorld.m[row][column] == cachedWorld.m[row][column];
+                }
+            }
+            if (unchanged) {
+                continue;
+            }
+            const int transformOffset = 21 + sourceShape.absPos + sourceShape.marker.size() + 2;
+            FlattenedLayer placement;
+            placement.rotation = detail::readLeFloat(artwork, transformOffset);
+            placement.posX = detail::readLeFloat(artwork, transformOffset + 4);
+            placement.posY = detail::readLeFloat(artwork, transformOffset + 8);
+            placement.scaleX = detail::readLeFloat(artwork, transformOffset + 12);
+            placement.scaleY = detail::readLeFloat(artwork, transformOffset + 16);
+            placement.skew = detail::readLeFloat(artwork, transformOffset + 20);
+            const Matrix3 parentWorld = detail::multiply(sourceShape.worldMatrix, invertAffine(shapeMatrix(placement)));
+            const scene::Transform2D local = decomposeTransform2D(detail::multiply(
+                invertAffine(parentWorld), detail::multiply(canvasInverse, currentWorld)));
+            QByteArray record;
+            detail::appendLeFloat(record, static_cast<float>(local.rotation));
+            detail::appendLeFloat(record, static_cast<float>(local.x));
+            detail::appendLeFloat(record, static_cast<float>(local.y));
+            detail::appendLeFloat(record, static_cast<float>(local.scaleX));
+            detail::appendLeFloat(record, static_cast<float>(local.scaleY));
+            detail::appendLeFloat(record, static_cast<float>(local.skew));
+            for (const quint8 channel : current.color) {
+                record.append(static_cast<char>(channel));
+            }
+            artwork.replace(transformOffset, record.size(), record);
+        }
+    }
+
+    return artwork;
+}
+
+std::optional<SourceLivery> legacySourceFrames(const Project &project) {
+    if (project.liverySource.isEmpty()) {
+        return std::nullopt;
+    }
+    SourceLivery source;
+    source.payload = parseInflatedLiveryPayload(project.liverySource);
+    if (source.payload.gyvlOffset >= 66) {
+        FM2023LiveryPayload payload;
+        payload.gyvlBody = source.payload.body;
+        const int stats = source.payload.gyvlOffset
+            + static_cast<int>(detail::readLeU32(project.liverySource, source.payload.gyvlOffset - 4));
+        for (int slot = 0; slot < kFM2023SectionCount; ++slot) {
+            payload.sectionCounts.append(static_cast<int>(detail::readLeU32(project.liverySource, stats + 4 + slot * 4)));
+        }
+        source.payload.sectionCounts = payload.sectionCounts;
+        source.sections = decodeFM2023LiverySections(payload);
+    } else {
+        source.sections = buildLiverySections(source.payload.body, source.payload.sectionCounts);
+    }
+
+    return source;
+}
+
+void appendGroupToShapeTransition(QByteArray &bytes, int groupDepth) {
+    bytes.append('\0');
+    bytes.append(QByteArray(std::max(0, groupDepth - 1), '\x01'));
+}
+
 QVector<LiveryEntry> childrenForEntry(const LiveryEntry &entry) {
     if (entry.kind != LiveryEntry::Group || entry.group == nullptr) {
         throw std::runtime_error("livery artwork entries cannot have children");
@@ -1054,7 +1185,8 @@ QByteArray packLiveryGroup(const LiveryEntry &entry, const Matrix3 &parentWorld,
                            int parentSourceAbsPos, bool parentUsesSourceFrame,
                            const QByteArray &transformMarker, bool parentMask,
                            bool &previousShapeMask, const Matrix3 &worldAdjustment,
-                           const QHash<int, SourceGroupFrame> &sourceFrames) {
+                           const QHash<int, SourceGroupFrame> &sourceFrames,
+                           bool legacyMarkers) {
     const QVector<LiveryEntry> children = childrenForEntry(entry);
     if (children.isEmpty()) {
         throw std::runtime_error("livery group has no visible children");
@@ -1082,7 +1214,8 @@ QByteArray packLiveryGroup(const LiveryEntry &entry, const Matrix3 &parentWorld,
             detail::multiply(invertAffine(parentWorld), groupWorld));
     }
     QByteArray out = packLiveryGroupTransform(
-        localTransform, liveryTransformMarker(transformMarker));
+        localTransform, legacyMarkers && !transformMarker.isEmpty()
+            ? QByteArray(1, '\0') : liveryTransformMarker(transformMarker));
     out.append(localTransform.scaleX * localTransform.scaleY < 0.0
                    ? packMarkerlessGroupHeader(children, "livery group")
                    : packCountedGroupHeader(children, isMaskGroup, "livery group"));
@@ -1108,14 +1241,17 @@ QByteArray packLiveryGroup(const LiveryEntry &entry, const Matrix3 &parentWorld,
                 child, groupWorld,
                 entry.group != nullptr ? entry.group->sourceAbsPos : 0,
                 usesSourceFrame, marker, childMask, previousShapeMask,
-                worldAdjustment, sourceFrames));
+                worldAdjustment, sourceFrames, legacyMarkers));
             previousWasGroup = true;
             previousGroupDepth = terminalDepth(child);
         } else if (child.shape != nullptr) {
+            if (previousWasGroup && legacyMarkers) {
+                appendGroupToShapeTransition(out, previousGroupDepth);
+            }
             const quint8 fallbackLead = (!hasPreviousSibling || childMask || previousShapeMask)
                 ? 0x01
                 : 0x00;
-            const quint8 lead = liveryArtworkLead(
+            const quint8 lead = previousWasGroup && legacyMarkers ? 0x01 : liveryArtworkLead(
                 *child.shape, fallbackLead, previousShapeMask);
             const bool bare = false;
             const bool artworkMask = appendLiveryArtworkRecord(
@@ -1131,7 +1267,8 @@ QByteArray packLiveryGroup(const LiveryEntry &entry, const Matrix3 &parentWorld,
 
 void appendStructuralSection(QByteArray &body, const scene::Group *sectionGroup,
                               const SourceLivery *source, int slot, bool hasFollowingSlot,
-                              const QHash<int, SourceGroupFrame> &sourceFrames) {
+                              const QHash<int, SourceGroupFrame> &sourceFrames,
+                              bool legacyMarkers) {
     if (sectionGroup == nullptr) {
         body.append(sourceEmptySlot(source, slot));
         return;
@@ -1170,11 +1307,14 @@ void appendStructuralSection(QByteArray &body, const scene::Group *sectionGroup,
             marker = maybeFlipMaskFlag(marker, previousShapeMask);
             previousShapeMask = false;
             body.append(packLiveryGroup(child, sectionWorld, 0, false, marker, false,
-                                        previousShapeMask, worldAdjustment, sourceFrames));
+                                        previousShapeMask, worldAdjustment, sourceFrames, legacyMarkers));
             previousWasGroup = true;
             previousGroupDepth = terminalDepth(child);
         } else if (child.shape != nullptr) {
-            const quint8 lead = liveryArtworkLead(
+            if (previousWasGroup && legacyMarkers) {
+                appendGroupToShapeTransition(body, previousGroupDepth);
+            }
+            const quint8 lead = previousWasGroup && legacyMarkers ? 0x01 : liveryArtworkLead(
                 *child.shape, previousShapeMask ? 0x01 : 0x00, previousShapeMask);
             const bool bare = liveryArtworkBare(*child.shape, !hasPreviousSibling);
             const bool artworkMask = appendLiveryArtworkRecord(
@@ -1211,7 +1351,9 @@ void appendStructuralSection(QByteArray &body, const scene::Group *sectionGroup,
 
 } // namespace
 
-QByteArray buildLiveryGyvl(const Project &project, std::array<int, kLiverySectionCount> *outSectionCounts) {
+static QByteArray buildLiveryGyvlImpl(const Project &project, int sectionCount,
+                                     bool preserveSource,
+                                     std::array<int, kLiverySectionCount> *outSectionCounts) {
     std::array<const scene::Group *, kLiverySectionCount> slotGroups{};
     std::array<QVector<const scene::Shape *>, kLiverySectionCount> slotShapes;
     if (project.root) {
@@ -1247,11 +1389,29 @@ QByteArray buildLiveryGyvl(const Project &project, std::array<int, kLiverySectio
         }
     }
 
-    const std::optional<SourceLivery> source = sourceLivery(project);
+    for (int slot = sectionCount; slot < kLiverySectionCount; ++slot) {
+        if (!slotShapes[slot].isEmpty()) {
+            throw std::runtime_error(
+                QStringLiteral("The selected game cannot represent artwork in section %1.")
+                    .arg(slotGroups[slot]->name).toStdString());
+        }
+    }
+
+    const std::optional<SourceLivery> source = preserveSource ? sourceLivery(project) : std::nullopt;
+    const std::optional<SourceLivery> nativeFrames = preserveSource ? std::nullopt : legacySourceFrames(project);
+    if (nativeFrames && nativeArtworkMatchesSource(*nativeFrames, slotGroups, slotShapes, sectionCount)) {
+        if (outSectionCounts != nullptr) {
+            outSectionCounts->fill(0);
+            std::copy(nativeFrames->payload.sectionCounts.cbegin(), nativeFrames->payload.sectionCounts.cend(),
+                      outSectionCounts->begin());
+        }
+        return patchNativeArtwork(project, *nativeFrames, slotShapes, sectionCount);
+    }
     const SourceLivery *sourcePtr = source ? &*source : nullptr;
-    const QHash<int, SourceGroupFrame> sourceFrames = sourceGroupFrames(sourcePtr);
+    const QHash<int, SourceGroupFrame> sourceFrames = sourceGroupFrames(
+        nativeFrames ? &*nativeFrames : sourcePtr);
     bool requiresStructuralArtwork = false;
-    for (int slot = 0; slot < kLiverySectionCount; ++slot) {
+    for (int slot = 0; slot < sectionCount; ++slot) {
         const int sourceCount = sourcePtr != nullptr
                 && slot < sourcePtr->payload.sectionCounts.size()
             ? sourcePtr->payload.sectionCounts[slot]
@@ -1266,14 +1426,14 @@ QByteArray buildLiveryGyvl(const Project &project, std::array<int, kLiverySectio
     // yrvl counts are coupled to the records emitted for each slot.
     std::array<int, kLiverySectionCount> counts{};
     int lastPopulatedSlot = -1;
-    for (int slot = 0; slot < kLiverySectionCount; ++slot) {
+    for (int slot = 0; slot < sectionCount; ++slot) {
         if (!slotShapes[slot].isEmpty()) {
             lastPopulatedSlot = slot;
         }
     }
     QByteArray body;
     bool adjustedTrailingSlots = false;
-    for (int slot = 0; slot < kLiverySectionCount; ++slot) {
+    for (int slot = 0; slot < sectionCount; ++slot) {
         const QVector<const scene::Shape *> &shapes = slotShapes[slot];
         const LiverySection *section = sourceSection(sourcePtr, slot);
         const bool hasRasterArtwork = std::any_of(
@@ -1296,7 +1456,7 @@ QByteArray buildLiveryGyvl(const Project &project, std::array<int, kLiverySectio
             continue;
         }
 
-        if (requiresStructuralArtwork && shapes.isEmpty() && slot + 1 < kLiverySectionCount) {
+        if (requiresStructuralArtwork && shapes.isEmpty() && slot + 1 < sectionCount) {
             QByteArray emptySlot = sourceEmptySlot(sourcePtr, slot);
             if (slot == lastPopulatedSlot + 1) {
                 if (!adjustedTrailingSlots) {
@@ -1315,9 +1475,9 @@ QByteArray buildLiveryGyvl(const Project &project, std::array<int, kLiverySectio
             QByteArray preserved = sourceSlotBytes(sourcePtr, slot);
             if (shapes.isEmpty()) {
                 const int expectedSize = kLiveryEmptySlotBytes
-                    + (slot == kLiverySectionCount - 1 ? kLiveryBodyTruncate : 0);
+                    + (slot == sectionCount - 1 ? kLiveryBodyTruncate : 0);
                 if (preserved.size() != expectedSize || !isEmptySlotRecord(preserved)) {
-                    const bool hasFullFinalRecord = slot == kLiverySectionCount - 1
+                    const bool hasFullFinalRecord = slot == sectionCount - 1
                         && preserved.size() >= expectedSize;
                     preserved = sourceEmptySlot(sourcePtr, slot);
                     // Match sourceSlotBytes' virtual tail before the final trim.
@@ -1329,7 +1489,7 @@ QByteArray buildLiveryGyvl(const Project &project, std::array<int, kLiverySectio
                 body.append(preserved);
                 counts[static_cast<size_t>(slot)] = 0;
             } else {
-                if (slot == lastPopulatedSlot && slot + 1 < kLiverySectionCount) {
+                if (slot == lastPopulatedSlot && slot + 1 < sectionCount) {
                     const int populatedSize = sourcePopulatedSlotSize(section);
                     if (populatedSize > 0 && preserved.size() > populatedSize) {
                         preserved.truncate(populatedSize);
@@ -1343,10 +1503,10 @@ QByteArray buildLiveryGyvl(const Project &project, std::array<int, kLiverySectio
             continue;
         }
 
-        const bool hasFollowingSlot = slot + 1 < kLiverySectionCount;
+        const bool hasFollowingSlot = slot + 1 < sectionCount;
         appendStructuralSection(body, slotGroups[slot], sourcePtr, slot, hasFollowingSlot,
-                                sourceFrames);
-        if (sourcePtr != nullptr && slot == kLiverySectionCount - 1 && !shapes.isEmpty()) {
+                                sourceFrames, sectionCount < kLiverySectionCount);
+        if (sourcePtr != nullptr && slot == sectionCount - 1 && !shapes.isEmpty()) {
             body.append(QByteArray(kLiveryBodyTruncate, '\0'));
         }
         counts[static_cast<size_t>(slot)] = static_cast<int>(shapes.size());
@@ -1362,6 +1522,70 @@ QByteArray buildLiveryGyvl(const Project &project, std::array<int, kLiverySectio
     QByteArray chunk(reinterpret_cast<const char *>(kGyvlHeader), 0x15);
     chunk.append(body);
     return chunk;
+}
+
+QByteArray buildLiveryGyvl(const Project &project,
+                          std::array<int, kLiverySectionCount> *outSectionCounts) {
+    return buildLiveryGyvlImpl(project, kLiverySectionCount, true, outSectionCounts);
+}
+
+QByteArray buildLiveryGyvlForSectionCount(const Project &project, int sectionCount,
+                                        std::array<int, kLiverySectionCount> *outSectionCounts) {
+    if (sectionCount <= 0 || sectionCount > kLiverySectionCount) {
+        throw std::runtime_error("invalid livery export section count");
+    }
+
+    std::array<int, kLiverySectionCount> counts{};
+    const QByteArray artwork = buildLiveryGyvlImpl(project, sectionCount, false, &counts);
+    QVector<int> decodedCounts;
+    for (int slot = 0; slot < sectionCount; ++slot) {
+        decodedCounts.append(counts[slot]);
+    }
+    QVector<LiverySection> sections;
+    if (sectionCount == kFM2023SectionCount) {
+        FM2023LiveryPayload payload;
+        payload.gyvlBody = artwork.mid(21);
+        payload.sectionCounts = decodedCounts;
+        sections = decodeFM2023LiverySections(payload);
+    } else {
+        sections = buildLiverySections(artwork.mid(21), decodedCounts);
+    }
+    for (int slot = 0; slot < sectionCount; ++slot) {
+        QVector<const scene::Shape *> expected;
+        if (project.root != nullptr) {
+            for (const auto &child : project.root->children) {
+                if (child->kind() == scene::LayerKind::Group) {
+                    const auto &group = static_cast<const scene::Group &>(*child);
+                    if (group.isLiverySection && group.liverySectionSlot == slot) {
+                        collectSectionShapes(group, expected);
+                    }
+                }
+            }
+        }
+        if (slot >= sections.size()) {
+            throw std::runtime_error("native export could not reconstruct its artwork sections");
+        }
+        const QVector<SourceShapeView> actual = sourceSectionShapes(sections[slot]);
+        if (actual.size() != expected.size()) {
+            throw std::runtime_error("native export could not retain its artwork count");
+        }
+        const Matrix3 canvas = liverySectionCanvasTransform(slot);
+        for (int index = 0; index < actual.size(); ++index) {
+            const SourceShapeView &encoded = actual[index];
+            const scene::Shape &shape = *expected[index];
+            if (encoded.raster != shape.raster || encoded.rasterId != shape.rasterId
+                || (!shape.raster && encoded.shapeId != shape.shapeId)
+                || encoded.color != shape.color
+                || !matrixClose(detail::multiply(canvas, encoded.worldMatrix), shape.worldMatrix())) {
+                throw std::runtime_error("native export could not retain its artwork transforms or colors");
+            }
+        }
+    }
+    if (outSectionCounts != nullptr) {
+        *outSectionCounts = counts;
+    }
+
+    return artwork;
 }
 
 } // namespace fls

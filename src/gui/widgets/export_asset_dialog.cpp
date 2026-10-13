@@ -1,0 +1,292 @@
+#include "export_asset_dialog.h"
+
+#include <QComboBox>
+#include <QCheckBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDir>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QFormLayout>
+#include <QGroupBox>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QSettings>
+#include <QSignalBlocker>
+#include <QStandardItemModel>
+#include <QVBoxLayout>
+
+#include <exception>
+
+namespace gui {
+namespace {
+
+constexpr int kDialogWidth = 640;
+constexpr int kDialogHeight = 400;
+constexpr int kLayoutMargin = 12;
+constexpr int kLayoutSpacing = 8;
+constexpr char kGeometrySettingsKey[] = "export/dialogGeometry";
+constexpr char kDescriptorSettingsKey[] = "export/wgsDescriptor";
+
+class ExportAssetDialog final : public QDialog {
+public:
+    ExportAssetDialog(QWidget *parent, const QString &startDirectory,
+                      const QString &projectName, bool livery, int carId)
+        : QDialog(parent), pgsDirectory_(startDirectory), livery_(livery), carId_(carId) {
+        setWindowTitle(QStringLiteral("Export"));
+        setModal(true);
+        resize(kDialogWidth, kDialogHeight);
+
+        auto *layout = new QVBoxLayout(this);
+        layout->setContentsMargins(kLayoutMargin, kLayoutMargin, kLayoutMargin, kLayoutMargin);
+        layout->setSpacing(kLayoutSpacing);
+
+        auto *project = new QLabel(
+            QStringLiteral("%1 — %2").arg(
+                projectName.isEmpty() ? QStringLiteral("Untitled") : projectName,
+                livery ? QStringLiteral("Livery") : QStringLiteral("Layer group")), this);
+        project->setTextFormat(Qt::PlainText);
+        project->setWordWrap(true);
+        project->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        layout->addWidget(project);
+
+        auto *form = new QFormLayout();
+        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        form->setSpacing(kLayoutSpacing);
+        auto *destination = new QHBoxLayout();
+        directoryEdit_ = new QLineEdit(QDir::toNativeSeparators(startDirectory), this);
+        directoryEdit_->setClearButtonEnabled(true);
+        directoryEdit_->setPlaceholderText(QStringLiteral("Destination folder"));
+        browse_ = new QPushButton(QStringLiteral("Browse…"), this);
+        browse_->setAutoDefault(false);
+        destination->addWidget(directoryEdit_, 1);
+        destination->addWidget(browse_);
+        form->addRow(QStringLiteral("Destination path"), destination);
+
+        gameVersion_ = new QComboBox(this);
+        gameVersion_->addItem(QStringLiteral("Forza Horizon 6"),
+                              static_cast<int>(ExportGameVersion::Horizon6));
+        gameVersion_->addItem(QStringLiteral("Forza Horizon 5"),
+                              static_cast<int>(ExportGameVersion::Horizon5));
+        gameVersion_->addItem(QStringLiteral("Forza Motorsport 2023"),
+                              static_cast<int>(ExportGameVersion::Motorsport2023));
+        form->addRow(QStringLiteral("Game version"), gameVersion_);
+
+        containerFormat_ = new QComboBox(this);
+        containerFormat_->addItem(QStringLiteral("PGS / asset folder"),
+                                  static_cast<int>(ExportContainerFormat::PgsFolder));
+        containerFormat_->addItem(QStringLiteral("WGS / replace existing container"),
+                                  static_cast<int>(ExportContainerFormat::WgsContainer));
+        form->addRow(QStringLiteral("Container format"), containerFormat_);
+        layout->addLayout(form);
+
+        folderHint_ = new QLabel(QStringLiteral(
+            "The export folder is named from the project metadata. "
+            "An existing asset folder can also be selected as the destination."), this);
+        folderHint_->setWordWrap(true);
+        layout->addWidget(folderHint_);
+
+        wgsOptions_ = new QGroupBox(QStringLiteral("WGS replacement"), this);
+        auto *wgsForm = new QFormLayout(wgsOptions_);
+        auto *descriptorRow = new QHBoxLayout();
+        descriptorEdit_ = new QLineEdit(QSettings().value(QLatin1String(kDescriptorSettingsKey)).toString(), wgsOptions_);
+        descriptorEdit_->setPlaceholderText(QStringLiteral("Select container.1 or the active container.N"));
+        auto *descriptorBrowse = new QPushButton(QStringLiteral("Browse…"), wgsOptions_);
+        descriptorBrowse->setAutoDefault(false);
+        descriptorRow->addWidget(descriptorEdit_, 1);
+        descriptorRow->addWidget(descriptorBrowse);
+        wgsForm->addRow(QStringLiteral("Container descriptor"), descriptorRow);
+        profileEdit_ = new QLineEdit(wgsOptions_);
+        profileEdit_->setReadOnly(true);
+        wgsForm->addRow(QStringLiteral("Save profile"), profileEdit_);
+        containerNameEdit_ = new QLineEdit(wgsOptions_);
+        containerNameEdit_->setReadOnly(true);
+        wgsForm->addRow(QStringLiteral("Container name"), containerNameEdit_);
+        gameClosed_ = new QCheckBox(QStringLiteral("FH5 is closed and cloud synchronization has finished"), wgsOptions_);
+        wgsForm->addRow(gameClosed_);
+        layout->addWidget(wgsOptions_);
+        layout->addStretch(1);
+
+        hint_ = new QLabel(this);
+        hint_->setTextFormat(Qt::PlainText);
+        hint_->setWordWrap(true);
+        hint_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        layout->addWidget(hint_);
+        buttons_ = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
+        buttons_->button(QDialogButtonBox::Save)->setText(QStringLiteral("Export"));
+        layout->addWidget(buttons_);
+
+        connect(browse_, &QPushButton::clicked, this, [this]() { browseDirectory(); });
+        connect(descriptorBrowse, &QPushButton::clicked, this, [this]() { browseDescriptor(); });
+        connect(descriptorEdit_, &QLineEdit::textChanged, this, [this]() {
+            gameClosed_->setChecked(false);
+            updateDestination();
+        });
+        connect(gameClosed_, &QCheckBox::toggled, this, [this]() { updateDestination(); });
+        connect(directoryEdit_, &QLineEdit::textChanged, this, [this]() { updateDestination(); });
+        connect(gameVersion_, &QComboBox::currentIndexChanged, this, [this]() { updateFormat(); });
+        connect(containerFormat_, &QComboBox::currentIndexChanged, this, [this]() { updateFormat(); });
+        connect(buttons_, &QDialogButtonBox::accepted, this, [this]() {
+            updateDestination();
+            if (buttons_->button(QDialogButtonBox::Save)->isEnabled()) {
+                if (wgsTarget_) {
+                    QSettings().setValue(QLatin1String(kDescriptorSettingsKey), descriptorEdit_->text());
+                }
+                accept();
+            }
+        });
+        connect(buttons_, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
+        restoreGeometry(QSettings().value(QLatin1String(kGeometrySettingsKey)).toByteArray());
+        updateFormat();
+    }
+
+    ~ExportAssetDialog() override {
+        QSettings().setValue(QLatin1String(kGeometrySettingsKey), saveGeometry());
+    }
+
+    ExportAssetSelection selection() const {
+        ExportAssetSelection selected;
+        selected.directory = QFileInfo(destinationDirectory()).absoluteFilePath();
+        selected.gameVersion = static_cast<ExportGameVersion>(gameVersion_->currentData().toInt());
+        selected.containerFormat = static_cast<ExportContainerFormat>(containerFormat_->currentData().toInt());
+        selected.wgsTarget = wgsTarget_;
+
+        return selected;
+    }
+
+private:
+    bool wgsSelected() const {
+        return static_cast<ExportContainerFormat>(containerFormat_->currentData().toInt()) == ExportContainerFormat::WgsContainer;
+    }
+
+    void updateFormat() {
+        auto *model = qobject_cast<QStandardItemModel *>(containerFormat_->model());
+        const int wgsIndex = containerFormat_->findData(static_cast<int>(ExportContainerFormat::WgsContainer));
+        const bool supported = static_cast<ExportGameVersion>(gameVersion_->currentData().toInt()) == ExportGameVersion::Horizon5;
+
+        model->item(wgsIndex)->setEnabled(supported);
+        model->item(wgsIndex)->setToolTip(QStringLiteral("FH5 existing-slot replacement"));
+        if (!supported && wgsSelected()) {
+            const QSignalBlocker blocker(containerFormat_);
+            containerFormat_->setCurrentIndex(containerFormat_->findData(static_cast<int>(ExportContainerFormat::PgsFolder)));
+        }
+        const bool wgs = wgsSelected();
+        if (wgs != wgsActive_) {
+            const QSignalBlocker blocker(directoryEdit_);
+            if (wgs) {
+                pgsDirectory_ = directoryEdit_->text();
+                directoryEdit_->clear();
+            } else {
+                directoryEdit_->setText(pgsDirectory_);
+            }
+            gameClosed_->setChecked(false);
+            wgsActive_ = wgs;
+        }
+        directoryEdit_->setEnabled(!wgs);
+        browse_->setEnabled(!wgs);
+        folderHint_->setVisible(!wgs);
+        wgsOptions_->setVisible(wgs);
+        updateDestination();
+    }
+
+    void browseDescriptor() {
+        const QString current = QDir::fromNativeSeparators(descriptorEdit_->text().trimmed());
+        const QString start = QFileInfo(current).exists() ? current : pgsDirectory_;
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("Select WGS Container"), start,
+            QStringLiteral("WGS descriptors (container.*)"), nullptr, QFileDialog::DontUseNativeDialog);
+        if (!path.isEmpty()) {
+            descriptorEdit_->setText(QDir::toNativeSeparators(path));
+        }
+    }
+
+    QString destinationDirectory() const {
+        const QString path = QDir::fromNativeSeparators(directoryEdit_->text().trimmed());
+
+        return path.isEmpty() ? QString() : QDir::cleanPath(path);
+    }
+
+    void browseDirectory() {
+        const QString current = destinationDirectory();
+        const QString startDirectory = QFileInfo(current).isDir() ? current : QDir::homePath();
+        const QString directory = QFileDialog::getExistingDirectory(
+            this, QStringLiteral("Export Destination"), startDirectory,
+            QFileDialog::ShowDirsOnly | QFileDialog::DontUseNativeDialog);
+        if (!directory.isEmpty()) {
+            directoryEdit_->setText(QDir::toNativeSeparators(directory));
+        }
+    }
+
+    void updateDestination() {
+        wgsTarget_.reset();
+        if (wgsSelected()) {
+            profileEdit_->clear();
+            containerNameEdit_->clear();
+            buttons_->button(QDialogButtonBox::Save)->setEnabled(false);
+            try {
+                const QString path = QDir::fromNativeSeparators(descriptorEdit_->text().trimmed());
+                wgsTarget_ = fls::inspectWgsExportTarget(path,
+                    static_cast<ExportGameVersion>(gameVersion_->currentData().toInt()), livery_, carId_);
+                const QString profile = QFileInfo(wgsTarget_->indexPath).absolutePath();
+                const QSignalBlocker blocker(directoryEdit_);
+                directoryEdit_->setText(QDir::toNativeSeparators(profile));
+                profileEdit_->setText(QDir(profile).dirName());
+                containerNameEdit_->setText(wgsTarget_->containerName);
+                buttons_->button(QDialogButtonBox::Save)->setEnabled(gameClosed_->isChecked());
+                hint_->setText(QStringLiteral(
+                    "This replaces the selected slot and creates a backup under .fls-wgs-backups. "
+                    "Confirm FH5 is closed before exporting."));
+            } catch (const std::exception &error) {
+                const QSignalBlocker blocker(directoryEdit_);
+                directoryEdit_->clear();
+                hint_->setText(descriptorEdit_->text().trimmed().isEmpty()
+                    ? QStringLiteral("Select the active container.1 or container.N from your FH5 WGS save.")
+                    : QString::fromUtf8(error.what()));
+            }
+            return;
+        }
+        const QString directory = destinationDirectory();
+        const bool valid = !directory.isEmpty() && QDir::isAbsolutePath(directory)
+            && QFileInfo(directory).isDir();
+
+        buttons_->button(QDialogButtonBox::Save)->setEnabled(valid);
+        hint_->setText(valid
+            ? QStringLiteral("Ready to export to %1.").arg(gameVersion_->currentText())
+            : QStringLiteral("Choose an existing destination folder with an absolute path."));
+    }
+
+    QLineEdit *directoryEdit_ = nullptr;
+    QLineEdit *descriptorEdit_ = nullptr;
+    QLineEdit *profileEdit_ = nullptr;
+    QLineEdit *containerNameEdit_ = nullptr;
+    QComboBox *gameVersion_ = nullptr;
+    QComboBox *containerFormat_ = nullptr;
+    QLabel *hint_ = nullptr;
+    QLabel *folderHint_ = nullptr;
+    QPushButton *browse_ = nullptr;
+    QGroupBox *wgsOptions_ = nullptr;
+    QCheckBox *gameClosed_ = nullptr;
+    QDialogButtonBox *buttons_ = nullptr;
+    QString pgsDirectory_;
+    std::optional<fls::WgsExportTarget> wgsTarget_;
+    bool livery_ = false;
+    bool wgsActive_ = false;
+    int carId_ = 0;
+};
+
+} // namespace
+
+std::optional<ExportAssetSelection> showExportAssetDialog(
+    QWidget *parent, const QString &startDirectory, const QString &projectName, bool livery, int carId) {
+    ExportAssetDialog dialog(parent, startDirectory, projectName, livery, carId);
+    if (dialog.exec() != QDialog::Accepted) {
+        return std::nullopt;
+    }
+
+    return dialog.selection();
+}
+
+} // namespace gui

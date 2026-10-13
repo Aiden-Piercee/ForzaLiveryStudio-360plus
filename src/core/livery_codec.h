@@ -35,5 +35,7 @@ bool isLiveryAssetFileName(const QString &fileName);
 
 QByteArray buildLiveryGyvl(const Project &project,
                            std::array<int, 11> *outSectionCounts = nullptr);
+QByteArray buildLiveryGyvlForSectionCount(const Project &project, int sectionCount,
+                                        std::array<int, 11> *outSectionCounts);
 
 } // namespace fls

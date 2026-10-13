@@ -17,6 +17,7 @@ QJsonObject projectToJson(const Project &project);
 
 QByteArray encodeProjectDocument(const Project &project);
 Project decodeProjectDocument(const QByteArray &fileBytes);
+QByteArray creatorTagFromSavePath(const QString &path);
 Project importCGroupFlat(const QString &folderOrFile);
 Project importCGroupNested(const QString &folderOrFile);
 Project importCGroupNestedData(const QByteArray &wrapped, const QByteArray &header,

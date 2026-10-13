@@ -57,6 +57,8 @@ add_library(fls_core STATIC
     src/core/core_types.h
     src/core/game_paths.cpp
     src/core/game_paths.h
+    src/core/game_export.cpp
+    src/core/game_export.h
     src/core/fls_core.cpp
     src/core/fls_core.h
     src/core/fm_codec.cpp
@@ -105,6 +107,8 @@ add_library(fls_core STATIC
     src/core/vinyl_flattener.h
     src/core/wgs_save_reader.cpp
     src/core/wgs_save_reader.h
+    src/core/wgs_save_writer.cpp
+    src/core/wgs_save_writer.h
     src/core/zip_extract.cpp
     src/core/zip_extract.h
 )
@@ -259,6 +263,8 @@ qt_add_executable(${FORZA_LIVERY_STUDIO_TARGET} WIN32
     src/gui/widgets/clipboard_buffer_widget.h
     src/gui/widgets/color_palette_widget.cpp
     src/gui/widgets/color_palette_widget.h
+    src/gui/widgets/export_asset_dialog.cpp
+    src/gui/widgets/export_asset_dialog.h
     src/gui/widgets/font_glyphs.cpp
     src/gui/widgets/font_glyphs.h
     src/gui/widgets/header_metadata_widget.cpp
@@ -376,6 +382,14 @@ if(FLS_BUILD_TESTS)
         COMMAND fls_livery_logo_encoder_tests --legacy-artwork)
     add_test(NAME livery_legacy_five_panel
         COMMAND fls_livery_logo_encoder_tests --legacy-five-panel)
+
+    add_executable(fls_game_export_tests tools/game_export_test.cpp)
+    target_link_libraries(fls_game_export_tests PRIVATE fls_core Qt6::Core)
+    add_test(NAME game_export COMMAND fls_game_export_tests)
+
+    add_executable(fls_wgs_save_writer_tests tools/wgs_save_writer_test.cpp)
+    target_link_libraries(fls_wgs_save_writer_tests PRIVATE fls_core Qt6::Core)
+    add_test(NAME wgs_save_writer COMMAND fls_wgs_save_writer_tests)
 
     add_executable(fls_guide_preprocess_metadata_tests
         tools/guide_preprocess_metadata_test.cpp
@@ -514,6 +528,8 @@ else()
         COMMAND "${CMAKE_COMMAND}" -E rm -f
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_livery_logo_encoder_tests${CMAKE_EXECUTABLE_SUFFIX}"
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_wgs_save_reader_tests${CMAKE_EXECUTABLE_SUFFIX}"
+            "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_wgs_save_writer_tests${CMAKE_EXECUTABLE_SUFFIX}"
+            "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_game_export_tests${CMAKE_EXECUTABLE_SUFFIX}"
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_guide_preprocess_metadata_tests${CMAKE_EXECUTABLE_SUFFIX}"
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_image_preprocessor_tests${CMAKE_EXECUTABLE_SUFFIX}"
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_region_pen_conversion_tests${CMAKE_EXECUTABLE_SUFFIX}"
@@ -528,7 +544,6 @@ set(FLS_GUI_ASSETS
     CursorClosedHand.xpm
     CursorOpenHand.xpm
     CursorPipette.xpm
-    LICENSE.QtHandCursors.txt
     MenuCopy.xpm
     MenuCut.xpm
     MenuDelete.xpm

@@ -4,6 +4,8 @@
 #include <QString>
 #include <QtGlobal>
 
+#include <optional>
+
 namespace fls {
 
 inline constexpr quint32 kCurrentHeaderFormatVersion = 7;
@@ -20,8 +22,12 @@ struct HeaderMetadata {
     QByteArray creatorTag;
     QString creatorName;
     QByteArray sectionPrefix;
+    QByteArray sectionMarker;
+    QByteArray sectionPadding;
+    std::optional<quint32> category;
     quint32 typeValue = 0;
     quint32 carId = 0;
+    bool hasCarId = true;
     QByteArray guid;
     QByteArray trailing;
     QByteArray publishedTail;

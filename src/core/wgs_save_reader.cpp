@@ -9,6 +9,8 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <limits>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -199,6 +201,45 @@ QString firstFile(const QHash<QString, QString> &files, const QStringList &ids) 
     return {};
 }
 
+std::optional<quint8> descriptorVersion(const QDir &directory) {
+    const QStringList names = directory.entryList(
+        {QStringLiteral("container.*")}, QDir::Files, QDir::Name);
+    if (names.size() != 1) {
+        return std::nullopt;
+    }
+    bool ok = false;
+    const uint value = names.front().mid(QStringLiteral("container.").size()).toUInt(&ok);
+    if (!ok || value > std::numeric_limits<quint8>::max()) {
+        return std::nullopt;
+    }
+
+    return static_cast<quint8>(value);
+}
+
+WgsAsset assetFromFiles(const QString &containerName, const QHash<QString, QString> &files) {
+    const QString liveryPath = firstFile(files, {QStringLiteral("C_livery")});
+    const QString groupPath = firstFile(files, {QStringLiteral("C_group")});
+    if (liveryPath.isEmpty() && groupPath.isEmpty()) {
+        throw std::runtime_error("WGS container has no livery or group payload");
+    }
+
+    WgsAsset asset;
+    asset.containerName = containerName;
+    asset.payloadPath = !liveryPath.isEmpty() ? liveryPath : groupPath;
+    asset.headerPath = firstFile(files, {QStringLiteral("header")});
+    asset.thumbnailPath = firstFile(files, {
+        QStringLiteral("bigThumb.png"),
+        QStringLiteral("thumb.png"),
+        QStringLiteral("smallThumb.png"),
+        QStringLiteral("bigThumb.webp"),
+        QStringLiteral("thumb.webp"),
+        QStringLiteral("thumbnail"),
+    });
+    asset.kind = !liveryPath.isEmpty() ? WgsAssetKind::Livery : WgsAssetKind::Group;
+
+    return asset;
+}
+
 } // namespace
 
 bool isWgsSaveDirectory(const QString &path) {
@@ -206,6 +247,25 @@ bool isWgsSaveDirectory(const QString &path) {
     return info.isDir()
         && QFileInfo(QDir(info.absoluteFilePath()).filePath(
                          QStringLiteral("containers.index"))).isFile();
+}
+
+bool isWgsContainerDirectory(const QString &path) {
+    const QFileInfo info(path);
+    return info.isDir() && descriptorVersion(QDir(info.absoluteFilePath())).has_value();
+}
+
+WgsAsset readWgsContainer(const QString &path) {
+    const QFileInfo info(path);
+    if (!info.isDir()) {
+        throw std::runtime_error("WGS container is not a directory");
+    }
+    const QDir directory(info.absoluteFilePath());
+    const std::optional<quint8> version = descriptorVersion(directory);
+    if (!version) {
+        throw std::runtime_error("WGS container descriptor is missing or ambiguous");
+    }
+
+    return assetFromFiles(info.fileName(), readDescriptor(directory.absolutePath(), *version));
 }
 
 WgsSave readWgsSave(const QString &path) {
@@ -246,26 +306,11 @@ WgsSave readWgsSave(const QString &path) {
 
         const QString directoryPath = root.filePath(directoryName);
         const QHash<QString, QString> files = readDescriptor(directoryPath, version);
-        const QString liveryPath = firstFile(files, {QStringLiteral("C_livery")});
-        const QString groupPath = firstFile(files, {QStringLiteral("C_group")});
-        if (liveryPath.isEmpty() && groupPath.isEmpty()) {
+        try {
+            save.assets.push_back(assetFromFiles(containerName, files));
+        } catch (const std::exception &) {
             continue;
         }
-
-        WgsAsset asset;
-        asset.containerName = containerName;
-        asset.payloadPath = !liveryPath.isEmpty() ? liveryPath : groupPath;
-        asset.headerPath = firstFile(files, {QStringLiteral("header")});
-        asset.thumbnailPath = firstFile(files, {
-            QStringLiteral("bigThumb.png"),
-            QStringLiteral("thumb.png"),
-            QStringLiteral("smallThumb.png"),
-            QStringLiteral("bigThumb.webp"),
-            QStringLiteral("thumb.webp"),
-            QStringLiteral("thumbnail"),
-        });
-        asset.kind = !liveryPath.isEmpty() ? WgsAssetKind::Livery : WgsAssetKind::Group;
-        save.assets.push_back(std::move(asset));
     }
 
     std::sort(save.assets.begin(), save.assets.end(), [](const WgsAsset &left, const WgsAsset &right) {

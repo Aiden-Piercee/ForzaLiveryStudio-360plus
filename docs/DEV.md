@@ -87,7 +87,7 @@ exports grouped `C_group` folders and `C_livery` folders.
   zooming the canvas. Scene edits invalidate the cached overlay.
 - Holding Space on the canvas shows an open hand cursor; panning shows a closed
   hand. Releasing the pan shortcut restores the active tool cursor. Hand artwork
-  is bundled as XPM with its Qt license notice in `assets/icons/`.
+  is bundled as XPM in `assets/icons/`.
 - Nudge selected layers/guides precisely in Move or Transform with arrow keys;
   normal and Shift step sizes are configurable in Settings.
 - Read world coordinates from pan/zoom-aware canvas rulers and manage persistent
@@ -272,15 +272,34 @@ exports grouped `C_group` folders and `C_livery` folders.
   **Distribute** (Vertical/Horizontal) evens the gaps between unit bounds
   along one axis; a lone selected group distributes its own direct children. Both
   evaluate world-space shape geometry.
-- Export through one **Export…** action that writes a grouped (nested) `C_group`
+- Export through one **Export…** action with a dedicated Qt dialog for the
+  destination path, folder browsing, game version, and container format. The
+  supported PGS targets are FH6, FH5, and Forza Motorsport 2023. FH5 WGS output
+  replaces an existing registered asset through a container-descriptor selector,
+  with automatic save-profile and container-name fields. The
+  dialog remembers its geometry and uses the remembered export destination.
+  Export writes a grouped (nested) `C_group`
   folder — preserving group structure, nesting, and masks — plus copied sidecars, a
   preview thumbnail, and draft/imported header handling. The same action exports
   imported and newly created livery projects while preserving visible section
   group structure, nesting, and masks. With a
-  car model loaded, livery export writes `bigThumb.webp` from the textured car render.
+  car model loaded, livery export writes the target game's thumbnail from the
+  textured car render. FH5 uses PNG thumbnails and compressed `C_group` or
+  `C_livery` payloads. Motorsport uses GUID asset folders with `data`, `header`,
+  and PNG `thumbnail` files; group data is raw and livery data is block-compressed.
+  FH5 and Motorsport retain imported positional paint metadata. Edited paint
+  bindings are rejected until their positional mapping is supported. Export also
+  rejects artwork in sections unavailable in the target game.
+  WGS export checks the active descriptor generation, asset type, target car,
+  and profile identity before staging the payload. It preserves slot and blob
+  identifiers and opaque index fields, updates timestamps and sizes, and backs up
+  the index and selected container under `.fls-wgs-backups` in the profile folder.
+  Writes use atomic file replacement with rollback on failure. The game must be
+  closed and cloud synchronization finished before replacement. New WGS slots
+  and other games' WGS layouts remain deferred. See `WGS.md` for the pipeline.
   The preview's **Color** control stores one opaque default solid color in the
   project's canonical livery paint-material bindings. The same records drive the
-  live car, project JSON round trips, native `C_livery` export, and the thumbnail.
+  live car, project JSON round trips, FH6 native `C_livery` export, and the thumbnail.
 - Preview a car in 3D with the current vinyl applied: **Import Car Model…**
   decodes a `.modelbin` (single model), a `.carbin` (full car - referenced parts
   assembled with their per-part transforms), or a zipped car folder (`.zip`) and

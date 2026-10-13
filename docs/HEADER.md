@@ -30,14 +30,22 @@ u32       creator-name length in UTF-16 code units
 byte[]    creator name in UTF-16LE
 byte[28]  section prefix
 byte[2]   section marker
-byte[7]   section padding
+byte[]    section padding
+u32?      category
 u32       type value
-u32       target car identifier
+u32?      target car identifier
 byte[16]  asset GUID
 byte[]    trailing data
 ```
 
-The metadata field block, creator identity tag, section prefix, GUID, and trailing
+FH5 headers use versions 4 and 6, with a five-byte or nine-byte marker-and-padding
+block according to the section-prefix layout. Their car identifier is optional;
+native livery drafts include it and group drafts omit it. FH6 uses version 7 and a
+nine-byte marker-and-padding block. Motorsport uses version 9, a nine-byte
+marker-and-padding block, and a category preceding the type value. Its car
+identifier follows the type value.
+
+The metadata field block, creator identity tag, section prefix, marker padding, GUID, and trailing
 data are preserved by the editor. Livery export synchronizes the target car
 identifier and decal total with the embedded container metadata.
 

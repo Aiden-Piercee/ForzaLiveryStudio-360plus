@@ -71,6 +71,7 @@ struct AssetInfo {
     QString creator;
     QString date;
     QString thumbnailPath;
+    QString payloadPath;
 
     bool valid() const { return kind != AssetKind::None; }
     bool motorsport() const {
@@ -177,6 +178,20 @@ AssetInfo inspectAsset(const QString &path) {
     AssetInfo asset;
     const QFileInfo directoryInfo(path);
     if (!directoryInfo.isDir()) {
+        return asset;
+    }
+
+    if (fls::isWgsContainerDirectory(directoryInfo.absoluteFilePath())) {
+        try {
+            const fls::WgsAsset wgsAsset = fls::readWgsContainer(directoryInfo.absoluteFilePath());
+            asset.kind = wgsAsset.kind == fls::WgsAssetKind::Livery
+                ? AssetKind::HorizonLivery
+                : AssetKind::HorizonGroup;
+            asset.thumbnailPath = wgsAsset.thumbnailPath;
+            asset.payloadPath = wgsAsset.payloadPath;
+            readHeaderMetadata(wgsAsset.headerPath, asset);
+        } catch (const std::exception &) {
+        }
         return asset;
     }
 
@@ -777,6 +792,7 @@ private:
         QString assetPath;
         QString thumbnailPath;
         AssetKind kind = AssetKind::None;
+        QString payloadPath;
     };
 
     void setGridView(bool enabled, bool persist = true) {
@@ -983,7 +999,12 @@ private:
                     if (!asset.thumbnailPath.isEmpty()
                         || asset.kind == AssetKind::HorizonLivery
                         || asset.kind == AssetKind::MotorsportLivery) {
-                        detailsRequests.push_back({folder.absoluteFilePath(), asset.thumbnailPath, asset.kind});
+                        detailsRequests.push_back({
+                            folder.absoluteFilePath(),
+                            asset.thumbnailPath,
+                            asset.kind,
+                            asset.payloadPath,
+                        });
                     }
                 }
 
@@ -1110,7 +1131,9 @@ private:
         }
         if (isLiveryKind(request.kind)) {
             QThreadPool::globalInstance()->start([dialog, request, generation]() {
-                const QString car = liveryCarName(request.kind, request.assetPath);
+                const QString car = liveryCarName(
+                    request.kind,
+                    request.payloadPath.isEmpty() ? request.assetPath : request.payloadPath);
                 if (car.isEmpty()) {
                     return;
                 }
@@ -1189,9 +1212,17 @@ private:
         }
         selectedPath_ = item->data(kPathRole).toString();
         selectedMotorsport_ = item->data(kMotorsportRole).toBool();
+        selectedWgsAsset_.reset();
         const QVariant wgsIndex = item->data(kWgsAssetIndexRole);
         if (wgsIndex.isValid()) {
             selectedWgsAsset_ = wgsAssets_.at(wgsIndex.toInt());
+        } else if (fls::isWgsContainerDirectory(selectedPath_)) {
+            try {
+                selectedWgsAsset_ = fls::readWgsContainer(selectedPath_);
+            } catch (const std::exception &error) {
+                hint_->setText(QString::fromUtf8(error.what()));
+                return;
+            }
         }
         accept();
     }
