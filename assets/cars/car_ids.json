@@ -72,7 +72,7 @@
 "424": {"model": "MAZ_RX7_97", "name": "Mazda RX-7 97", "version": "FH5"},
 "425": {"model": "MAZ_RX7SpiritR_02", "name": "Mazda RX-7 Spirit R Type-A 02", "version": "FH5"},
 "427": {"model": "HON_S2000_03", "name": "Honda S2000 03", "version": "FH5, FH6"},
-"432": {"model": "SAL_S7_04", "name": "Saleen S7 04", "version": "FH5"},
+"432": {"model": "SAL_S7_04", "name": "Saleen S7 04", "version": "FH5, FH6"},
 "433": {"model": "TVR_Sagaris_05", "name": "TVR Sagaris 05", "version": "FH5, FH6"},
 "439": {"model": "NIS_SilviaK_92", "name": "Nissan Silvia CLUB K's 92", "version": "FH5"},
 "440": {"model": "NIS_SilviaKs_94", "name": "Nissan Silvia K's 94", "version": "FH5, FH6"},
@@ -601,7 +601,7 @@
 "3188": {"model": "POR_65_911Desert_85", "name": "Porsche #65 Rothsport Racing 911 \"Desert Flyer\" 89", "version": "FH5"},
 "3189": {"model": "HEN_Velociraptor6x6_18", "name": "Hennessey Ford F-150 VelociRaptor 6X6 19", "version": "FH5, FH6"},
 "3190": {"model": "FOR_SVTLightning_03", "name": "Ford F-150 SVT Lightning 03", "version": "FH5, FH6"},
-"3191": {"model": "LAM_Espada400GT_73", "name": "Lamborghini Espada 400 GT 73", "version": "FH5"},
+"3191": {"model": "LAM_Espada400GT_73", "name": "Lamborghini Espada 400 GT 73", "version": "FH5, FH6"},
 "3194": {"model": "ITA_Zerouno_18", "name": "Italdesign Zerouno 18", "version": "FH5"},
 "3195": {"model": "ATS_GT_18", "name": "ATS GT 18", "version": "FH5"},
 "3196": {"model": "RAE_Tachyon_19", "name": "RAESR Tachyon Speed 19", "version": "FH5"},
@@ -956,5 +956,14 @@
 "3980": {"model": "REN_SportSpider_98", "name": "Renault Sport Spider 98", "version": "FH6"},
 "4067": {"model": "BEN_ContinentalGT_25", "name": "Bentley Continental GT Speed 25", "version": "FH6"},
 "4118": {"model": "MCL_W1_25", "name": "McLaren W1 25", "version": "FH6"},
-"4354": {"model": "JAG_XJSFE_90", "name": "Jaguar XJ-S Forza Edition 90", "version": "FH6"}
+"4354": {"model": "JAG_XJSFE_90", "name": "Jaguar XJ-S Forza Edition 90", "version": "FH6"},
+"1511": {"model": "HOL_MonaroGTS_68", "name": "Holden Monaro GTS 327 68", "version": "FH6"},
+"2157": {"model": "CIT_2CV_70", "name": "Citroën 2CV 70", "version": "FH6"},
+"2817": {"model": "HON_Prelude_00", "name": "Honda Prelude Type SH 00", "version": "FH6"},
+"3085": {"model": "FOR_DebertiMustang_18", "name": "DeBerti Ford Mustang GT 18", "version": "FH6"},
+"3593": {"model": "FER_Purosangue_24", "name": "Ferrari Purosangue 24", "version": "FH6"},
+"3839": {"model": "MER_AMGGT_24", "name": "Mercedes-AMG GT 63 4MATIC+ 24", "version": "FH6"},
+"3857": {"model": "EUN_Cosmo_90", "name": "Eunos Cosmo 90", "version": "FH6"},
+"4122": {"model": "BMW_M4CS_25", "name": "BMW M4 CS 25", "version": "FH6"},
+"4188": {"model": "DAT_5_240ZRallye_72", "name": "Datsun 240Z #5 Rallye 72", "version": "FH6"}
 }
