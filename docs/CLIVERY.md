@@ -262,18 +262,35 @@ artwork and counters. `decodeFM2023LiverySections()` builds the section trees, a
 
 ## Native Export Targets
 
-The PGS exporter selects the tagged envelope, artwork section count, counters,
+The PGS exporter selects the metadata envelope, artwork section count, counters,
 paint layout, header version, and compression framing for the destination game.
-FH6 retains its eleven artwork sections and hashed paint descriptors. FH5 writes
-five artwork sections and seven counters. Motorsport writes seven artwork sections
-and seven counters, wrapped in independently compressed blocks of at most 32768
-uncompressed bytes.
+FH6 retains its eleven artwork sections and hashed paint descriptors.
 
-FH5 and Motorsport use a positional paint chunk containing a status byte,
-34 fixed-size 40-byte records, and a two-byte tail. Imported native chunks are
-retained intact. New artwork-only projects receive inherited paint records;
-edited hashed paint bindings require a positional mapping and are rejected.
-The exporter validates target section availability before writing the asset.
-Native artwork retains its framing when the scene hierarchy remains compatible;
-placement and color edits are patched relative to the retained group transforms.
+| Target | Header version | Livery information version | Artwork sections | Paint records |
+| --- | --- | --- | --- | --- |
+| FH2 | 0 | 5 | 6 | 20 |
+| FH3 | 1 | 6 | 6 | 30 |
+| FM5 | 0 | 2 | 6 | 20 |
+| FM6 | 0 | 5 | 6 | 30 |
+| FH5 | 4 | 17 | 6 | 34 |
+| FM2023 | 9 | 19 | 7 | 34 |
+
+The six body sections are Front, Back, Top, Left, Right, and Spoiler. Window
+artwork is discarded for every target except FH6. FM2023 retains an empty seventh
+wire slot. These targets write seven section counters. FM5 stores counters and
+paint directly after its length-delimited artwork; later formats frame these
+blocks with `yrvl` tags. FH2, FH3, FM5, and FM6 use `01` shape markers in embedded
+artwork. Their decoder supplies virtual terminal padding for the section walker.
+Their populated sections use seventeen-byte separators. Opaque legacy logo
+records retain structural occupancy during decoding and are omitted from export.
+FM2023 uses independently compressed blocks of at most 32768 uncompressed bytes.
+
+Positional paint chunks contain a status byte, fixed-size 40-byte records, and a
+two-byte tail. Compatible imported chunks are retained intact. Unmatched paint
+data is discarded, and export supplies native inherited records with manufacturer
+selector `0xffffffff` and finish `0`. These formats have no material-hash field;
+hashed editor bindings without a positional mapping are omitted.
+Older targets rebuild counted groups with baked placements and a shared section
+scale. FH5 and FM2023 retain compatible native framing; placement and color edits
+are patched relative to the retained group transforms.
 Rebuilt artwork is decoded and checked against the scene before export.

@@ -72,6 +72,14 @@ public:
                               static_cast<int>(ExportGameVersion::Horizon5));
         gameVersion_->addItem(QStringLiteral("Forza Motorsport 2023"),
                               static_cast<int>(ExportGameVersion::Motorsport2023));
+        gameVersion_->addItem(QStringLiteral("Forza Horizon 2"),
+                              static_cast<int>(ExportGameVersion::Horizon2));
+        gameVersion_->addItem(QStringLiteral("Forza Horizon 3"),
+                              static_cast<int>(ExportGameVersion::Horizon3));
+        gameVersion_->addItem(QStringLiteral("Forza Motorsport 5"),
+                              static_cast<int>(ExportGameVersion::Motorsport5));
+        gameVersion_->addItem(QStringLiteral("Forza Motorsport 6"),
+                              static_cast<int>(ExportGameVersion::Motorsport6));
         form->addRow(QStringLiteral("Game version"), gameVersion_);
 
         containerFormat_ = new QComboBox(this);

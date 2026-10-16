@@ -38,6 +38,12 @@ byte[16]  asset GUID
 byte[]    trailing data
 ```
 
+FH2, FM5, and FM6 use version 0; FH3 uses version 1. After the creator name,
+these headers contain a sixteen-byte prefix, a version-sized padding field,
+the decal total, an optional livery car identifier, and an eight-byte asset
+identifier. The asset type in the metadata field block determines whether the
+car identifier is present. Remaining bytes are retained as trailing metadata.
+
 FH5 headers use versions 4 and 6, with a five-byte or nine-byte marker-and-padding
 block according to the section-prefix layout. Their car identifier is optional;
 native livery drafts include it and group drafts omit it. FH6 uses version 7 and a

@@ -52,6 +52,7 @@ struct GroupEntry {
 struct ExportContext {
     const Project &project;
     SpriteSizeFn spriteSize;
+    GroupRecordGeneration generation = GroupRecordGeneration::Current;
 };
 
 struct ExportShape {
@@ -95,14 +96,15 @@ int checkChildCount(int count, const char *label) {
 }
 
 QByteArray packShapeRelative(const ExportShape &shape, double offsetX, double offsetY,
-                             quint8 firstMarker, bool bare) {
+                             quint8 firstMarker, bool bare, GroupRecordGeneration generation) {
     QByteArray out;
+    const char marker = generation == GroupRecordGeneration::Current ? '\x02' : '\x01';
     out.reserve(32);
-    if (bare) {
-        out.append('\x02');
+    if (bare && generation == GroupRecordGeneration::Current) {
+        out.append(marker);
     } else {
         out.append(static_cast<char>(firstMarker));
-        out.append('\x02');
+        out.append(marker);
     }
     appendLeU16(out, shape.shapeId);
     appendLeFloat(out, static_cast<float>(normalizeRotation(shape.rotation)));
@@ -127,11 +129,14 @@ QByteArray packTranslationTransform(double x, double y, const QByteArray &marker
     return out;
 }
 
-QByteArray childBitmap(const QVector<GroupEntry> &items, const char *label) {
+QByteArray childBitmap(const QVector<GroupEntry> &items, const char *label,
+                       GroupRecordGeneration generation) {
     const int blocks = checkChildCount(items.size(), label);
     QByteArray bitmap(blocks, '\x00');
     for (int i = 0; i < items.size(); ++i) {
-        if (items[i].kind == GroupEntry::Group || items[i].kind == GroupEntry::Virtual) {
+        const bool maskedShapeGroup = generation != GroupRecordGeneration::Current
+            && items[i].shape != nullptr && items[i].shape->mask;
+        if (items[i].kind == GroupEntry::Group || items[i].kind == GroupEntry::Virtual || maskedShapeGroup) {
             bitmap[i / 8] = static_cast<char>(static_cast<quint8>(bitmap[i / 8]) | (1 << (i % 8)));
         }
     }
@@ -147,6 +152,18 @@ QByteArray packGroupHeader(int count, const QByteArray &bitmap, quint8 marker, c
     out.append(QByteArray(2, '\x00'));
     out.append(bitmap);
     return out;
+}
+
+QByteArray packNativeShape(const ExportShape &shape, const QPointF &origin,
+                           quint8 lead, bool bare, GroupRecordGeneration generation) {
+    if (generation != GroupRecordGeneration::Current && shape.mask) {
+        QByteArray out = packGroupHeader(1, QByteArray(1, '\0'), 0x60, "mask");
+        out.append(packShapeRelative(shape, origin.x(), origin.y(), lead, true, generation));
+
+        return out;
+    }
+
+    return packShapeRelative(shape, origin.x(), origin.y(), lead, bare, generation);
 }
 
 QByteArray siblingGroupTransformMarker(int previousGroupDepth) {
@@ -326,7 +343,8 @@ QByteArray packNestedGroup(const ExportContext &ctx, const GroupEntry &entry,
                            QPointF parentOffset, const QByteArray &transformMarker,
                            bool parentMask, bool &previousShapeMask) {
     const QVector<GroupEntry> children = directChildren(entry);
-    if (children.size() < 2) {
+    if (children.isEmpty()
+        || (ctx.generation == GroupRecordGeneration::Current && children.size() < 2)) {
         throw std::runtime_error(
             QStringLiteral("nested group has fewer than two children: %1")
                 .arg(entryShapeRange(ctx, entry))
@@ -334,10 +352,14 @@ QByteArray packNestedGroup(const ExportContext &ctx, const GroupEntry &entry,
     }
     const bool isMaskGroup = entryAllMasked(entry);
     const bool childMask = parentMask || isMaskGroup;
-    const QPointF origin = entryOrigin(ctx, entry);
-    QByteArray out = packTranslationTransform(origin.x() - parentOffset.x(),
-                                              origin.y() - parentOffset.y(), transformMarker);
-    out.append(packGroupHeader(children.size(), childBitmap(children, "group"),
+    const bool currentGeneration = ctx.generation == GroupRecordGeneration::Current;
+    const QPointF origin = currentGeneration ? entryOrigin(ctx, entry) : parentOffset;
+    QByteArray nativeMarker = transformMarker;
+    nativeMarker.back() = static_cast<char>(ctx.generation);
+    QByteArray out = currentGeneration
+        ? packTranslationTransform(origin.x() - parentOffset.x(), origin.y() - parentOffset.y(), nativeMarker)
+        : QByteArray();
+    out.append(packGroupHeader(children.size(), childBitmap(children, "group", ctx.generation),
                                isMaskGroup ? 0x60 : 0x20, "group"));
 
     bool previousWasGroup = false;
@@ -365,13 +387,13 @@ QByteArray packNestedGroup(const ExportContext &ctx, const GroupEntry &entry,
             if (!child.shape->visible) {
                 throw std::runtime_error("grouped export cannot encode a hidden child inside a visible group");
             }
-            if (previousWasGroup) {
+            if (previousWasGroup && currentGeneration) {
                 out.append('\x00');
                 out.append(QByteArray(std::max(0, previousGroupDepth - 1), '\x01'));
             }
             const ExportShape packed = exportShape(*child.shape);
-            const quint8 lead = (previousWasGroup || previousShapeMask) ? 0x01 : 0x00;
-            out.append(packShapeRelative(packed, origin.x(), origin.y(), lead, previousSiblingId.isEmpty()));
+            const quint8 lead = currentGeneration && (previousWasGroup || previousShapeMask) ? 0x01 : 0x00;
+            out.append(packNativeShape(packed, origin, lead, previousSiblingId.isEmpty(), ctx.generation));
             previousWasGroup = false;
             previousGroupDepth = 0;
             previousShapeMask = packed.mask;
@@ -412,8 +434,9 @@ QByteArray rootCloseBytes(const QVector<GroupEntry> &items) {
 
 } // namespace
 
-QByteArray buildNestedPayload(const Project &project, const SpriteSizeFn &spriteSize) {
-    ExportContext ctx{project, spriteSize};
+QByteArray buildNestedPayload(const Project &project, const SpriteSizeFn &spriteSize,
+                             GroupRecordGeneration generation, bool centerArtwork) {
+    ExportContext ctx{project, spriteSize, generation};
     QVector<GroupEntry> items = rootItems(project);
     items.erase(std::remove_if(items.begin(), items.end(), [](const GroupEntry &entry) {
                     return entry.kind == GroupEntry::Layer && (entry.shape == nullptr || !entry.shape->visible);
@@ -427,13 +450,14 @@ QByteArray buildNestedPayload(const Project &project, const SpriteSizeFn &sprite
     for (const GroupEntry &item : items) {
         entryShapes(item, allLeaves);
     }
-    const QPointF center = shapesOrigin(ctx, allLeaves);
+    const QPointF center = centerArtwork ? shapesOrigin(ctx, allLeaves) : QPointF();
 
     QByteArray prefix = project.sourceDecPrefix.isEmpty() ? defaultPrefix() : project.sourceDecPrefix;
     prefix = prefix.left(0x1d);
     if (prefix.size() < 0x1d) {
         throw std::runtime_error("source decompressed prefix is shorter than 0x1d bytes");
     }
+    prefix[0x0c] = static_cast<char>(generation);
     QByteArray rootTransform;
     appendLeFloat(rootTransform, 0.0f);
     appendLeFloat(rootTransform, 0.0f);
@@ -441,7 +465,7 @@ QByteArray buildNestedPayload(const Project &project, const SpriteSizeFn &sprite
     appendLeFloat(rootTransform, 0.0f);
     prefix.replace(0x0d, 16, rootTransform);
 
-    const QByteArray rootBitmap = childBitmap(items, "root");
+    const QByteArray rootBitmap = childBitmap(items, "root", generation);
     QByteArray payload = prefix;
     payload.append('\x20');
     appendLeU16(payload, static_cast<quint16>(items.size()));
@@ -472,20 +496,23 @@ QByteArray buildNestedPayload(const Project &project, const SpriteSizeFn &sprite
             if (item.shape == nullptr) {
                 continue;
             }
-            if (previousWasGroup) {
+            if (previousWasGroup && generation == GroupRecordGeneration::Current) {
                 payload.append('\x00');
                 payload.append(QByteArray(std::max(0, previousGroupDepth - 1), '\x01'));
             }
             const ExportShape packed = exportShape(*item.shape);
-            const quint8 lead = (previousWasGroup || previousShapeMask) ? 0x01 : 0x00;
-            payload.append(packShapeRelative(packed, center.x(), center.y(), lead, previousSiblingId.isEmpty()));
+            const quint8 lead = generation == GroupRecordGeneration::Current
+                && (previousWasGroup || previousShapeMask) ? 0x01 : 0x00;
+            payload.append(packNativeShape(packed, center, lead, previousSiblingId.isEmpty(), generation));
             previousWasGroup = false;
             previousGroupDepth = 0;
             previousShapeMask = packed.mask;
         }
         previousSiblingId = item.id();
     }
-    payload.append(maybeFlipMaskFlag(rootCloseBytes(items), previousShapeMask));
+    if (generation == GroupRecordGeneration::Current) {
+        payload.append(maybeFlipMaskFlag(rootCloseBytes(items), previousShapeMask));
+    }
     return payload;
 }
 

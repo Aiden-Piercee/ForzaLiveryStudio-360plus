@@ -14,6 +14,9 @@ constexpr int CreatorTagSize = 8;   // tag1[4] + tag2[2] + sep[2]
 constexpr int FieldBlockSize = 16;  // fieldA..pad
 constexpr int GuidSize = 16;
 constexpr int PaddingBeforeSec3 = 28;
+constexpr int kEarlySectionPrefixSize = 16;
+constexpr int kEarlyGuidSize = 8;
+constexpr quint32 kLiveryAssetType = 3;
 
 QString readUtf16(const QByteArray &bytes, int offset, quint32 charCount) {
     const qsizetype byteCount = static_cast<qsizetype>(charCount) * 2;
@@ -87,6 +90,32 @@ HeaderMetadata parseHeader(const QByteArray &bytes) {
     offset += 4;
     meta.creatorName = readUtf16(bytes, offset, creatorLen);
     offset += static_cast<int>(creatorLen) * 2;
+
+    if (meta.formatVersion <= 1) {
+        const int paddingSize = static_cast<int>(meta.formatVersion);
+        meta.sectionPrefix = bytes.mid(offset, kEarlySectionPrefixSize);
+        if (meta.sectionPrefix.size() != kEarlySectionPrefixSize) {
+            throw std::runtime_error("header truncated in legacy section prefix");
+        }
+        offset += kEarlySectionPrefixSize;
+        meta.sectionPadding = bytes.mid(offset, paddingSize);
+        offset += paddingSize;
+        meta.typeValue = detail::readLeU32(bytes, offset);
+        offset += 4;
+        meta.hasCarId = detail::readLeU32(meta.fieldBlock, 12) == kLiveryAssetType;
+        if (meta.hasCarId) {
+            meta.carId = detail::readLeU32(bytes, offset);
+            offset += 4;
+        }
+        meta.guid = bytes.mid(offset, kEarlyGuidSize);
+        if (meta.guid.size() != kEarlyGuidSize) {
+            throw std::runtime_error("header truncated in legacy asset identifier");
+        }
+        meta.trailing = bytes.mid(offset + kEarlyGuidSize);
+        meta.parsedOk = true;
+
+        return meta;
+    }
 
     meta.sectionPrefix = bytes.mid(offset, PaddingBeforeSec3);
     if (meta.sectionPrefix.size() != PaddingBeforeSec3) {
@@ -192,6 +221,26 @@ QByteArray buildHeader(const HeaderMetadata &meta) {
 
     detail::appendLeU32(out, static_cast<quint32>(meta.creatorName.size()));
     appendUtf16(out, meta.creatorName);
+
+    if (meta.formatVersion <= 1) {
+        QByteArray prefix = meta.sectionPrefix.left(kEarlySectionPrefixSize);
+        QByteArray padding = meta.sectionPadding.left(static_cast<int>(meta.formatVersion));
+        QByteArray identifier = meta.guid.left(kEarlyGuidSize);
+
+        prefix.append(QByteArray(kEarlySectionPrefixSize - prefix.size(), '\0'));
+        padding.append(QByteArray(static_cast<int>(meta.formatVersion) - padding.size(), '\0'));
+        identifier.append(QByteArray(kEarlyGuidSize - identifier.size(), '\0'));
+        out.append(prefix);
+        out.append(padding);
+        detail::appendLeU32(out, meta.typeValue);
+        if (meta.hasCarId) {
+            detail::appendLeU32(out, meta.carId);
+        }
+        out.append(identifier);
+        out.append(meta.trailing);
+
+        return out;
+    }
 
     QByteArray sectionPrefix = meta.sectionPrefix.left(PaddingBeforeSec3);
     sectionPrefix.append(QByteArray(PaddingBeforeSec3 - sectionPrefix.size(), '\0'));

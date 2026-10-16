@@ -9,6 +9,10 @@ enum class ExportGameVersion {
     Horizon6,
     Horizon5,
     Motorsport2023,
+    Horizon2,
+    Horizon3,
+    Motorsport5,
+    Motorsport6,
 };
 
 QString exportThumbnailName(ExportGameVersion game, bool livery);

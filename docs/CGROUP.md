@@ -229,6 +229,10 @@ Generations 1 and 2 use odd record and transform leads as traversal framing. The
 parity does not carry trailing mask state. Generation 3 assigns trailing mask
 state to the contextual odd leads described below.
 
+PGS export uses generation 1 for FH2, FM5, and FM6, generation 2 for FH3,
+and generation 3 for FH5 and FH6. Older exports retain the counted hierarchy
+and bake group transforms into shape placements.
+
 Built-in vector IDs are canonicalized and validated against the runtime registry
 in `assets/vector/shape_names.json`. A complete unsupported livery record can
 still contribute structural occupancy to preserve section alignment, but it is

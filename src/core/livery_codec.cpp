@@ -24,7 +24,9 @@ namespace {
 
 constexpr int kCurrentLiverySectionCount = 11;
 constexpr int kLegacyLiveryStatsCount = 7;
-constexpr int kLegacyLiverySectionCount = 5;
+constexpr int kLegacyLiverySectionCount = 6;
+constexpr int kEarlyLiverySectionCount = 6;
+constexpr quint32 kEarlyLiveryVersion = 6;
 
 QString resolveLiveryPath(const QString &folderOrFile) {
     QFileInfo info(folderOrFile);
@@ -123,9 +125,15 @@ LiveryPayload parseInflatedLiveryPayloadImpl(const QByteArray &raw) {
         throw std::runtime_error("C_livery has no embedded gyvl chunk");
     }
     payload.gyvlOffset = gyvl;
+    payload.legacyRecords = payload.raw.size() >= 33
+        && detail::readLeU32(payload.raw, 4) == 1
+        && detail::readLeU32(payload.raw, 29) <= kEarlyLiveryVersion;
 
     const int bodyStart = gyvl + 0x15;
-    int bodyEnd = payload.raw.indexOf(QByteArray("yrvl", 4), gyvl);
+    const quint32 artworkSize = gyvl >= 4 ? detail::readLeU32(payload.raw, gyvl - 4) : 0;
+    const qint64 artworkEnd = static_cast<qint64>(gyvl) + artworkSize;
+    int bodyEnd = artworkSize >= 0x15 && artworkEnd <= payload.raw.size()
+        ? static_cast<int>(artworkEnd) : payload.raw.indexOf(QByteArray("yrvl", 4), gyvl);
     if (bodyEnd < 0 || bodyEnd < bodyStart) {
         bodyEnd = payload.raw.size();
     }
@@ -147,13 +155,14 @@ LiveryPayload parseInflatedLiveryPayloadImpl(const QByteArray &raw) {
     const int statsCount = hasStats && paintTag > statsTag
         ? (paintTag - statsTag - 4) / 4
         : kCurrentLiverySectionCount;
-    const int sectionCount = statsCount == kLegacyLiveryStatsCount
+    const int sectionCount = payload.legacyRecords ? kEarlyLiverySectionCount
+        : statsCount == kLegacyLiveryStatsCount
         ? kLegacyLiverySectionCount
         : std::min(statsCount, kCurrentLiverySectionCount);
     payload.sectionCounts.reserve(sectionCount);
     for (int i = 0; i < sectionCount; ++i) {
-        if (hasStats) {
-            const int off = statsTag + 4 + i * 4;
+        if (hasStats || payload.legacyRecords) {
+            const int off = statsTag + (hasStats ? 4 : 0) + i * 4;
             payload.sectionCounts.push_back(off + 4 <= payload.raw.size()
                                                 ? static_cast<int>(detail::readLeU32(payload.raw, off))
                                                 : 0);
@@ -168,6 +177,14 @@ LiveryPayload parseInflatedLiveryPayloadImpl(const QByteArray &raw) {
 
 LiveryPayload parseInflatedLiveryPayload(const QByteArray &raw) {
     return parseInflatedLiveryPayloadImpl(raw);
+}
+
+QVector<LiverySection> decodeLiverySections(const LiveryPayload &payload) {
+    VinylDecoderOptions options;
+    options.legacyLiveryRecords = payload.legacyRecords;
+    options.appendLiveryTailPadding = payload.sectionCounts.size() == kEarlyLiverySectionCount;
+
+    return VinylTreeDecoder(options).buildLiverySections(payload.body, payload.sectionCounts);
 }
 
 bool isLiveryAssetFileName(const QString &fileName) {
@@ -329,7 +346,10 @@ std::optional<SourceLivery> sourceLivery(const Project &project) {
     try {
         SourceLivery source;
         source.payload = parseInflatedLiveryPayload(project.liverySource);
-        source.sections = buildLiverySections(source.payload.body, source.payload.sectionCounts);
+        if (source.payload.legacyRecords) {
+            return std::nullopt;
+        }
+        source.sections = decodeLiverySections(source.payload);
         return source.sections.size() == kLiverySectionCount ? std::optional<SourceLivery>(source) : std::nullopt;
     } catch (...) {
         return std::nullopt;
@@ -1141,7 +1161,8 @@ std::optional<SourceLivery> legacySourceFrames(const Project &project) {
     }
     SourceLivery source;
     source.payload = parseInflatedLiveryPayload(project.liverySource);
-    if (source.payload.gyvlOffset >= 66) {
+    if (detail::readLeU32(project.liverySource, 4) == 2
+        && source.payload.gyvlOffset >= 66) {
         FM2023LiveryPayload payload;
         payload.gyvlBody = source.payload.body;
         const int stats = source.payload.gyvlOffset
@@ -1152,7 +1173,7 @@ std::optional<SourceLivery> legacySourceFrames(const Project &project) {
         source.payload.sectionCounts = payload.sectionCounts;
         source.sections = decodeFM2023LiverySections(payload);
     } else {
-        source.sections = buildLiverySections(source.payload.body, source.payload.sectionCounts);
+        source.sections = decodeLiverySections(source.payload);
     }
 
     return source;

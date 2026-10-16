@@ -274,7 +274,7 @@ exports grouped `C_group` folders and `C_livery` folders.
   evaluate world-space shape geometry.
 - Export through one **Export…** action with a dedicated Qt dialog for the
   destination path, folder browsing, game version, and container format. The
-  supported PGS targets are FH6, FH5, and Forza Motorsport 2023. FH5 WGS output
+  supported PGS targets are FH2, FH3, FH5, FH6, FM5, FM6, and Forza Motorsport 2023. FH5 WGS output
   replaces an existing registered asset through a container-descriptor selector,
   with automatic save-profile and container-name fields. The
   dialog remembers its geometry and uses the remembered export destination.
@@ -284,12 +284,12 @@ exports grouped `C_group` folders and `C_livery` folders.
   imported and newly created livery projects while preserving visible section
   group structure, nesting, and masks. With a
   car model loaded, livery export writes the target game's thumbnail from the
-  textured car render. FH5 uses PNG thumbnails and compressed `C_group` or
-  `C_livery` payloads. Motorsport uses GUID asset folders with `data`, `header`,
+  textured car render. FH2, FH3, FH5, FM5, and FM6 use PNG thumbnails and compressed
+  `C_group` or `C_livery` payloads. Motorsport 2023 uses GUID asset folders with `data`, `header`,
   and PNG `thumbnail` files; group data is raw and livery data is block-compressed.
-  FH5 and Motorsport retain imported positional paint metadata. Edited paint
-  bindings are rejected until their positional mapping is supported. Export also
-  rejects artwork in sections unavailable in the target game.
+  Compatible imported positional paint metadata is retained. Unmatched paint
+  data receives native inherited defaults. All targets except FH6 discard window
+  artwork and retain the six body sections through Spoiler.
   WGS export checks the active descriptor generation, asset type, target car,
   and profile identity before staging the payload. It preserves slot and blob
   identifiers and opaque index fields, updates timestamps and sizes, and backs up

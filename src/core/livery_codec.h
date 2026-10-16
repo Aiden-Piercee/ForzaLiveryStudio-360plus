@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core_types.h"
+#include "vinyl_decoder.h"
 
 #include <array>
 
@@ -24,6 +25,7 @@ struct LiveryPayload {
     QByteArray raw;
     int gyvlOffset = 0;
     int carId = 0;
+    bool legacyRecords = false;
     QByteArray body;
     QVector<int> sectionCounts;
     LiveryPaintState paint;
@@ -31,6 +33,7 @@ struct LiveryPayload {
 
 LiveryPayload readLiveryPayload(const QString &folderOrFile);
 LiveryPayload parseInflatedLiveryPayload(const QByteArray &raw);
+QVector<LiverySection> decodeLiverySections(const LiveryPayload &payload);
 bool isLiveryAssetFileName(const QString &fileName);
 
 QByteArray buildLiveryGyvl(const Project &project,

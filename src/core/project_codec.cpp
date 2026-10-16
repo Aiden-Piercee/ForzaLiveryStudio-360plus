@@ -728,7 +728,7 @@ Project importCGroupNestedData(const QByteArray &wrapped, const QByteArray &head
 static Project importCLiveryDecoded(const LiveryPayload &livery, Project project) {
     enforcePrivacyPolicyForCLivery(livery);
     const QVector<LiverySection> sections =
-        buildLiverySections(livery.body, livery.sectionCounts);
+        decodeLiverySections(livery);
 
     project.isLivery = true;
     project.carId = livery.carId;

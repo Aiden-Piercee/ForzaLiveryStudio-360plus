@@ -4,6 +4,7 @@
 #include "cgroup_codec.h"
 #include "layer.h"
 #include "livery_codec.h"
+#include "matrix_math.h"
 #include "project_codec.h"
 
 #include <QDir>
@@ -12,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
@@ -19,12 +21,13 @@
 namespace fls {
 namespace {
 
-constexpr int kHorizon5Sections = 5;
+constexpr int kHorizon5Sections = 6;
+constexpr int kEarlySections = 6;
+constexpr int kFirstWindowSection = 6;
 constexpr int kMotorsportSections = 7;
 constexpr int kLegacyCounters = 7;
 constexpr int kPaintRecordCount = 34;
 constexpr int kPaintRecordSize = 40;
-constexpr int kPaintBlockSize = 4 + 1 + kPaintRecordCount * kPaintRecordSize + 2;
 constexpr int kMotorsportBlockSize = 32768;
 constexpr int kCreatorTagSize = 8;
 constexpr quint32 kDefaultMotorsportCategory = 11;
@@ -33,6 +36,37 @@ constexpr int kMotorsportArtworkOffset = 66;
 constexpr int kMotorsportEntrySize = 7;
 constexpr int kMotorsportEntryCountOffset = 58;
 constexpr int kMotorsportEntriesOffset = 62;
+constexpr quint32 kDefaultPaintSelector = 0xffffffffu;
+constexpr quint32 kDefaultPaintFinish = 0;
+constexpr double kNativeFramePositionRange = 25000.0;
+constexpr double kNativeFrameScaleRange = 100.0;
+
+struct ExportProfile {
+    quint32 headerVersion;
+    quint32 liveryVersion;
+    int sectionCount;
+    int paintRecordCount;
+    GroupRecordGeneration groupGeneration;
+};
+
+ExportProfile exportProfile(ExportGameVersion game) {
+    switch (game) {
+    case ExportGameVersion::Horizon2:
+        return {0, 5, kEarlySections, 20, GroupRecordGeneration::First};
+    case ExportGameVersion::Horizon3:
+        return {1, 6, kEarlySections, 30, GroupRecordGeneration::Second};
+    case ExportGameVersion::Motorsport5:
+        return {0, 2, kEarlySections, 20, GroupRecordGeneration::First};
+    case ExportGameVersion::Motorsport6:
+        return {0, 5, kEarlySections, 30, GroupRecordGeneration::First};
+    case ExportGameVersion::Horizon5:
+        return {4, 17, kHorizon5Sections, kPaintRecordCount, GroupRecordGeneration::Current};
+    case ExportGameVersion::Motorsport2023:
+        return {9, 19, kMotorsportSections, kPaintRecordCount, GroupRecordGeneration::Current};
+    default:
+        throw std::runtime_error("unsupported native export game");
+    }
+}
 
 void writeFile(const QString &path, const QByteArray &bytes) {
     QFile file(path);
@@ -80,8 +114,9 @@ QByteArray nativeHeader(const Project &project, ExportGameVersion game,
     const QUuid folderId(QDir(outputFolder).dirName());
     const quint32 sourceVersion = metadata.formatVersion;
     const bool motorsport = game == ExportGameVersion::Motorsport2023;
+    const ExportProfile profile = exportProfile(game);
 
-    metadata.formatVersion = motorsport ? 9 : 4;
+    metadata.formatVersion = profile.headerVersion;
     metadata.name = project.name;
     metadata.published = false;
     metadata.description.clear();
@@ -91,6 +126,22 @@ QByteArray nativeHeader(const Project &project, ExportGameVersion game,
     metadata.carId = project.isLivery ? static_cast<quint32>(project.carId) : 0;
     metadata.hasCarId = motorsport || project.isLivery;
     metadata.creatorTag = creatorTag;
+    if (profile.headerVersion <= 1) {
+        const int identifierSize = 8;
+        metadata.fieldBlock = metadata.fieldBlock.left(16);
+        metadata.fieldBlock.append(QByteArray(16 - metadata.fieldBlock.size(), '\0'));
+        metadata.fieldBlock.replace(12, 4, QByteArray(project.isLivery ? "\x03\0\0\0" : "\x02\0\0\0", 4));
+        if (metadata.guid.size() != identifierSize || sourceVersion != profile.headerVersion) {
+            metadata.guid = nativeGuidBytes(QUuid::createUuid()).left(identifierSize);
+        }
+        metadata.sectionPrefix = QByteArray(16, '\0');
+        metadata.sectionPrefix.replace(12, 4, QByteArray(4, '\xff'));
+        metadata.sectionMarker.clear();
+        metadata.sectionPadding = QByteArray(static_cast<int>(profile.headerVersion), '\0');
+        metadata.category.reset();
+
+        return buildHeader(metadata);
+    }
     if (metadata.guid.size() != 16 || metadata.formatVersion != sourceVersion) {
         metadata.guid = nativeGuidBytes(QUuid::createUuid());
     }
@@ -112,43 +163,46 @@ QByteArray nativeHeader(const Project &project, ExportGameVersion game,
     return buildHeader(metadata);
 }
 
-QByteArray legacyPaintBlock(const Project &project) {
-    if (!project.liveryPaint.materials.isEmpty()) {
-        throw std::runtime_error(
-            "FH5/FM23 export cannot map edited paint bindings yet. "
-            "Export a project with unchanged native paint or without paint overrides.");
-    }
+QByteArray legacyPaintBlock(const Project &project, const ExportProfile &profile) {
     const QByteArray &source = project.liverySource;
     const int artwork = source.indexOf(QByteArray("gyvl", 4));
+    const bool tagged = profile.liveryVersion != 2;
+    const int paintSize = 1 + profile.paintRecordCount * kPaintRecordSize + 2;
     if (artwork >= 4) {
         const quint32 artworkSize = detail::readLeU32(source, artwork - 4);
         const qint64 stats = static_cast<qint64>(artwork) + artworkSize;
-        const qint64 paint = stats + 4 + kLegacyCounters * 4;
-        if (stats >= artwork && paint + kPaintBlockSize + 4 <= source.size()
-            && source.mid(stats, 4) == QByteArray("yrvl", 4)
-            && source.mid(paint, 4) == QByteArray("yrvl", 4)
-            && source.mid(paint + kPaintBlockSize, 4) == QByteArray("yrvl", 4)) {
+        const qint64 paintTag = stats + (tagged ? 4 : 0) + kLegacyCounters * 4;
+        const qint64 paint = paintTag + (tagged ? 4 : 0);
+        const int informationVersionOffset = detail::readLeU32(source, 4) == 2 ? 45 : 29;
+        const quint32 sourceVersion = source.size() >= informationVersionOffset + 4
+            ? detail::readLeU32(source, informationVersionOffset) : 0;
+        const bool matchingVersion = sourceVersion == profile.liveryVersion
+            || (profile.liveryVersion >= 17 && sourceVersion >= 17 && sourceVersion <= 19);
+        if (stats >= artwork && paint + paintSize <= source.size() && matchingVersion
+            && (!tagged || (source.mid(stats, 4) == QByteArray("yrvl", 4)
+                && source.mid(paintTag, 4) == QByteArray("yrvl", 4)
+                && source.mid(paint + paintSize, 4) == QByteArray("yrvl", 4)))) {
             bool validRecords = true;
-            for (int index = 0; index < kPaintRecordCount; ++index) {
-                const int offset = static_cast<int>(paint) + 5 + index * kPaintRecordSize;
+            for (int index = 0; index < profile.paintRecordCount; ++index) {
+                const int offset = static_cast<int>(paint) + 1 + index * kPaintRecordSize;
                 validRecords = validRecords && detail::bytesAt(source, offset, {1, 1});
             }
             if (validRecords) {
-                return source.mid(paint, kPaintBlockSize);
+                return source.mid(paint, paintSize);
             }
-        }
-        if (detail::readLeU32(source, 4) == 1 || artwork >= 66) {
-            throw std::runtime_error("the native paint block could not be preserved");
         }
     }
 
-    QByteArray paint("yrvl", 4);
+    QByteArray paint;
     paint.append('\0');
-    for (int index = 0; index < kPaintRecordCount; ++index) {
+    for (int index = 0; index < profile.paintRecordCount; ++index) {
         QByteArray record(kPaintRecordSize, '\0');
         record[0] = '\x01';
         record[1] = '\x01';
-        record.replace(27, 4, QByteArray(4, '\xff'));
+        QByteArray paintDefaults;
+        detail::appendLeU32(paintDefaults, kDefaultPaintSelector);
+        detail::appendLeU32(paintDefaults, kDefaultPaintFinish);
+        record.replace(27, paintDefaults.size(), paintDefaults);
         paint.append(record);
     }
     paint.append("\x00\x01", 2);
@@ -185,13 +239,24 @@ bool containsArtwork(const scene::Layer &layer) {
     return false;
 }
 
-Project nativeArtworkProject(const Project &project) {
+Project nativeArtworkProject(const Project &project, const ExportProfile &profile) {
     Project artwork = project;
     std::array<bool, 11> sections{};
     if (artwork.root == nullptr) {
         return artwork;
     }
     prepareNativeArtworkLayers(*artwork.root);
+    auto &children = artwork.root->children;
+    children.erase(std::remove_if(children.begin(), children.end(), [](const auto &child) {
+        return child->kind() == scene::LayerKind::Group
+            && static_cast<const scene::Group &>(*child).isLiverySection
+            && static_cast<const scene::Group &>(*child).liverySectionSlot >= kFirstWindowSection
+            && static_cast<const scene::Group &>(*child).liverySectionSlot < kFH6SectionCount;
+    }), children.end());
+    if (profile.headerVersion <= 1 || (!artwork.liverySource.isEmpty()
+        && parseInflatedLiveryPayload(artwork.liverySource).legacyRecords)) {
+        artwork.liverySource.clear();
+    }
     for (const auto &child : artwork.root->children) {
         if (!containsArtwork(*child)) {
             continue;
@@ -211,6 +276,102 @@ Project nativeArtworkProject(const Project &project) {
     return artwork;
 }
 
+int bakeNativeArtwork(scene::Group &group, const Matrix3 &adjustment) {
+    int count = 0;
+    auto &children = group.children;
+    for (auto child = children.begin(); child != children.end();) {
+        if ((*child)->kind() == scene::LayerKind::Group) {
+            const int childCount = bakeNativeArtwork(static_cast<scene::Group &>(**child), adjustment);
+            if (childCount == 0) {
+                child = children.erase(child);
+                continue;
+            }
+            count += childCount;
+        } else if ((*child)->kind() == scene::LayerKind::Shape) {
+            (*child)->transform = decomposeTransform2D(detail::multiply(adjustment, (*child)->worldMatrix()));
+            ++count;
+        }
+        ++child;
+    }
+    group.transform = {};
+
+    return count;
+}
+
+double nativeArtworkScale(const scene::Layer &layer, const Matrix3 &adjustment) {
+    double scale = 1.0;
+    if (layer.kind() == scene::LayerKind::Shape) {
+        const auto transform = decomposeTransform2D(detail::multiply(adjustment, layer.worldMatrix()));
+        scale = std::max({scale, std::abs(transform.x) / kNativeFramePositionRange,
+            std::abs(transform.y) / kNativeFramePositionRange,
+            std::abs(transform.scaleX) / kNativeFrameScaleRange,
+            std::abs(transform.scaleY) / kNativeFrameScaleRange});
+    } else if (layer.kind() == scene::LayerKind::Group) {
+        for (const auto &child : static_cast<const scene::Group &>(layer).children) {
+            scale = std::max(scale, nativeArtworkScale(*child, adjustment));
+        }
+    }
+
+    return std::ceil(scale);
+}
+
+QByteArray earlyArtwork(const Project &project, const ExportProfile &profile,
+                        std::array<int, 11> &counts) {
+    constexpr int kStandaloneRootCountOffset = 30;
+    constexpr int kSectionRootHeaderSize = 7;
+    QByteArray artwork("gyvl", 4);
+    artwork.append(QByteArray(8, '\0'));
+    detail::appendLeFloat(artwork, 1.0f);
+    artwork.append(QByteArray(5, '\0'));
+    for (int slot = 0; slot < profile.sectionCount; ++slot) {
+        Project section = project;
+        auto &children = section.root->children;
+        children.erase(std::remove_if(children.begin(), children.end(), [slot](const auto &child) {
+            return child->kind() != scene::LayerKind::Group
+                || static_cast<const scene::Group &>(*child).liverySectionSlot != slot;
+        }), children.end());
+        const Matrix3 canvasInverse = invertAffine(liverySectionCanvasTransform(slot));
+        const double scale = nativeArtworkScale(*section.root, canvasInverse);
+        const Matrix3 scaleInverse = affine(1.0 / scale, 0, 0, 0, 1.0 / scale, 0);
+        counts[slot] = bakeNativeArtwork(*section.root, detail::multiply(scaleInverse, canvasInverse));
+        if (counts[slot] == 0) {
+            artwork.append(QByteArray(8, '\0'));
+            detail::appendLeFloat(artwork, 1.0f);
+            detail::appendLeFloat(artwork, static_cast<float>(kFH6LiverySlots[std::max(0, slot - 1)].rotationDeg));
+            artwork.append(QByteArray(7, '\0'));
+            continue;
+        }
+        const QByteArray group = buildNestedPayload(section, {}, GroupRecordGeneration::First, false);
+        artwork.append(group.mid(kStandaloneRootCountOffset, kSectionRootHeaderSize));
+        if (scale > 1.0) {
+            artwork.append('\x01');
+            detail::appendLeFloat(artwork, 0.0f);
+            detail::appendLeFloat(artwork, 0.0f);
+            detail::appendLeFloat(artwork, static_cast<float>(scale));
+            detail::appendLeFloat(artwork, 0.0f);
+        }
+        artwork.append(group.mid(kStandaloneRootCountOffset + kSectionRootHeaderSize));
+        if (slot + 1 < profile.sectionCount) {
+            artwork.append(QByteArray(8, '\0'));
+            detail::appendLeFloat(artwork, 1.0f);
+            detail::appendLeFloat(artwork, static_cast<float>(kFH6LiverySlots[slot].rotationDeg));
+            artwork.append('\0');
+        }
+    }
+
+    return artwork;
+}
+
+QByteArray nativeArtwork(const Project &project, const ExportProfile &profile,
+                         std::array<int, 11> &counts) {
+    const Project artworkProject = nativeArtworkProject(project, profile);
+    if (profile.headerVersion <= 1) {
+        return earlyArtwork(artworkProject, profile, counts);
+    }
+
+    return buildLiveryGyvlForSectionCount(artworkProject, profile.sectionCount, &counts);
+}
+
 QByteArray nativeLiveryPayload(const Project &project, ExportGameVersion game,
                               const QByteArray &creatorTag,
                               std::array<int, 11> &counts) {
@@ -218,10 +379,11 @@ QByteArray nativeLiveryPayload(const Project &project, ExportGameVersion game,
         throw std::runtime_error("not a livery project");
     }
     const bool motorsport = game == ExportGameVersion::Motorsport2023;
-    const QByteArray paint = legacyPaintBlock(project);
-    const Project artworkProject = nativeArtworkProject(project);
-    const QByteArray artwork = buildLiveryGyvlForSectionCount(
-        artworkProject, motorsport ? kMotorsportSections : kHorizon5Sections, &counts);
+    const ExportProfile profile = exportProfile(game);
+    const bool early = profile.headerVersion <= 1;
+    const bool tagged = profile.liveryVersion != 2;
+    const QByteArray paint = legacyPaintBlock(project, profile);
+    const QByteArray artwork = nativeArtwork(project, profile, counts);
     QByteArray payload("vlrc", 4);
     QByteArray sourceEntries;
     const QByteArray &source = project.liverySource;
@@ -250,24 +412,36 @@ QByteArray nativeLiveryPayload(const Project &project, ExportGameVersion game,
     }
     payload.append('\0');
     payload.append("yrvl", 4);
-    detail::appendLeU32(payload, motorsport ? 19 : 17);
+    detail::appendLeU32(payload, profile.liveryVersion);
     payload.append(creatorTag);
     if (motorsport) {
         payload.append('\0');
         detail::appendLeU32(payload, entryCount);
         payload.append(sourceEntries);
-    } else {
+    } else if (!early) {
         detail::appendLeU32(payload, 1);
         payload.append('\0');
+    } else if (profile.liveryVersion >= 5) {
+        if (profile.liveryVersion == 6) {
+            payload.append('\0');
+        }
+        detail::appendLeU32(payload, 0);
     }
     detail::appendLeU32(payload, static_cast<quint32>(artwork.size()));
     payload.append(artwork);
-    payload.append("yrvl", 4);
+    if (tagged) {
+        payload.append("yrvl", 4);
+    }
     for (int index = 0; index < kLegacyCounters; ++index) {
         detail::appendLeU32(payload, static_cast<quint32>(counts[index]));
     }
+    if (tagged) {
+        payload.append("yrvl", 4);
+    }
     payload.append(paint);
-    payload.append("yrvl", 4);
+    if (tagged) {
+        payload.append("yrvl", 4);
+    }
     if (motorsport) {
         detail::appendLeU32(payload, 0);
     }
@@ -329,7 +503,7 @@ QString exportThumbnailName(ExportGameVersion game, bool livery) {
     if (game == ExportGameVersion::Motorsport2023) {
         return QStringLiteral("thumbnail");
     }
-    if (game == ExportGameVersion::Horizon5) {
+    if (game != ExportGameVersion::Horizon6) {
         return livery ? QStringLiteral("bigThumb.png") : QStringLiteral("thumb.png");
     }
 
@@ -387,7 +561,8 @@ void exportGameGroup(const Project &project, const QString &outputFolder,
     }
     Project nativeProject = project;
     nativeProject.sourceDecPrefix.clear();
-    const QByteArray payload = buildNestedPayload(nativeProject, spriteSize);
+    const QByteArray payload = buildNestedPayload(nativeProject, spriteSize,
+                                                 exportProfile(game).groupGeneration);
     const QByteArray header = nativeHeader(project, game, static_cast<quint32>(count),
                                            destinationCreatorTag(project, outputFolder), outputFolder);
     const bool motorsport = game == ExportGameVersion::Motorsport2023;

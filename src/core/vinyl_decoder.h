@@ -29,6 +29,7 @@ struct LiverySection {
 
 struct VinylDecoderOptions {
     bool appendLiveryTailPadding = false;
+    bool legacyLiveryRecords = false;
     QByteArray (*normalizeRecords)(QByteArray) = nullptr;
     void (*finalizeGroup)(VinylGroup &, const QByteArray &, const LayerData &) = nullptr;
 };
