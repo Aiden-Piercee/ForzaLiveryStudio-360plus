@@ -121,7 +121,9 @@ void EditorState::invalidateSceneTree() const {
 
 void EditorState::invalidateRenderCache() const {
     renderCacheDirty_ = true;
+    activeRenderCacheDirty_ = true;
     renderEntries_.clear();
+    activeRenderEntries_.clear();
     renderEntryByNodeId_.clear();
 }
 
@@ -205,6 +207,7 @@ void EditorState::updateRenderCacheTransforms(const QVector<QString> &targetIds)
     if (renderCacheDirty_ || targetIds.isEmpty()) {
         return;
     }
+    activeRenderCacheDirty_ = true;
     ensureSceneTree();
     std::function<void(const fls::scene::Layer &, const QTransform &)> apply =
         [&](const fls::scene::Layer &node, const QTransform &parentWorld) {
@@ -233,6 +236,24 @@ void EditorState::updateRenderCacheTransforms(const QVector<QString> &targetIds)
 const QVector<SceneRenderEntry> &EditorState::renderEntries() const {
     ensureRenderCache();
     return renderEntries_;
+}
+
+const QVector<SceneRenderEntry> &EditorState::activeRenderEntries() const {
+    ensureRenderCache();
+    if (!project_.isLivery || activeSectionId_.isEmpty()) {
+        return renderEntries_;
+    }
+    if (activeRenderCacheDirty_) {
+        activeRenderEntries_.clear();
+        for (const SceneRenderEntry &entry : renderEntries_) {
+            if (entry.sectionGroupId == activeSectionId_) {
+                activeRenderEntries_.append(entry);
+            }
+        }
+        activeRenderCacheDirty_ = false;
+    }
+
+    return activeRenderEntries_;
 }
 
 const EditorState::ProjectIndexCache &EditorState::projectIndexCache() const {
@@ -665,6 +686,7 @@ void EditorState::setActiveSectionId(const QString &sectionGroupId) {
         return;
     }
     activeSectionId_ = sectionGroupId;
+    activeRenderCacheDirty_ = true;
     Q_EMIT activeSectionChanged(sectionGroupId);
 }
 

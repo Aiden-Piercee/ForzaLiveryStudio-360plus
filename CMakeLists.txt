@@ -386,6 +386,56 @@ if(FLS_BUILD_TESTS)
     add_executable(fls_game_export_tests tools/game_export_test.cpp)
     target_link_libraries(fls_game_export_tests PRIVATE fls_core Qt6::Core)
     add_test(NAME game_export COMMAND fls_game_export_tests)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/FH6 to FH5 diagnostics/projects/11_first_2_sections.3so"
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/FH6 to FH5 diagnostics/boundary round 2/23_D11_remove_closers")
+        add_test(NAME game_fh5_framing_reference COMMAND fls_game_export_tests --fh5-framing-reference
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/FH6 to FH5 diagnostics/projects/11_first_2_sections.3so"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/FH6 to FH5 diagnostics/boundary round 2/23_D11_remove_closers")
+    endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoder roundtrip/complex livery")
+        add_test(NAME game_complex_references COMMAND fls_game_export_tests --complex-references
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoder roundtrip/complex livery")
+    endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoder roundtrip/1 livery per game")
+        add_test(NAME game_native_references COMMAND fls_game_export_tests --references
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoder roundtrip/1 livery per game")
+    endif()
+
+    add_executable(fls_game_roundtrip_tests
+        tools/game_roundtrip_test.cpp
+        src/gui/state/editor_state.h
+        src/gui/state/editor_state.cpp
+        src/gui/state/editor_state_clipboard.cpp
+        src/gui/state/editor_state_grouping.cpp
+        src/gui/state/editor_state_selection.cpp
+        src/gui/state/editor_state_snapshot.cpp)
+    target_include_directories(fls_game_roundtrip_tests PRIVATE
+        src/gui/app src/gui/state src/gui/widgets)
+    target_link_libraries(fls_game_roundtrip_tests PRIVATE fls_core Qt6::Gui)
+    add_test(NAME game_project_roundtrip COMMAND fls_game_roundtrip_tests)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/Forza Livery.3so")
+        add_test(NAME game_project_roundtrip_affine_fixture COMMAND fls_game_roundtrip_tests
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Forza Livery.3so")
+    endif()
+    add_executable(fls_export_target_tests
+        tools/export_target_test.cpp
+        src/gui/widgets/export_asset_dialog.cpp)
+    target_include_directories(fls_export_target_tests PRIVATE src/gui/widgets)
+    target_link_libraries(fls_export_target_tests PRIVATE fls_core Qt6::Widgets)
+    if(WIN32)
+        add_custom_command(TARGET fls_export_target_tests POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "$<TARGET_FILE_DIR:fls_export_target_tests>/platforms"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${Qt6_DIR}/../../Qt6/plugins/platforms/qoffscreen.dll"
+                "$<TARGET_FILE_DIR:fls_export_target_tests>/platforms/qoffscreen.dll")
+    endif()
+    add_test(NAME export_target COMMAND fls_export_target_tests)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoder roundtrip")
+        add_test(NAME game_project_roundtrip_fixtures
+            COMMAND fls_game_roundtrip_tests
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoder roundtrip")
+    endif()
 
     add_executable(fls_wgs_save_writer_tests tools/wgs_save_writer_test.cpp)
     target_link_libraries(fls_wgs_save_writer_tests PRIVATE fls_core Qt6::Core)
@@ -530,6 +580,8 @@ else()
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_wgs_save_reader_tests${CMAKE_EXECUTABLE_SUFFIX}"
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_wgs_save_writer_tests${CMAKE_EXECUTABLE_SUFFIX}"
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_game_export_tests${CMAKE_EXECUTABLE_SUFFIX}"
+            "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_game_roundtrip_tests${CMAKE_EXECUTABLE_SUFFIX}"
+            "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_export_target_tests${CMAKE_EXECUTABLE_SUFFIX}"
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_guide_preprocess_metadata_tests${CMAKE_EXECUTABLE_SUFFIX}"
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_image_preprocessor_tests${CMAKE_EXECUTABLE_SUFFIX}"
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_region_pen_conversion_tests${CMAKE_EXECUTABLE_SUFFIX}"

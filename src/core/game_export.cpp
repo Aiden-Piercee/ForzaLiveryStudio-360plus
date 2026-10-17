@@ -33,11 +33,14 @@ constexpr int kCreatorTagSize = 8;
 constexpr quint32 kDefaultMotorsportCategory = 11;
 constexpr quint32 kDefaultMotorsportPayloadFlags = 2;
 constexpr int kMotorsportArtworkOffset = 66;
-constexpr int kMotorsportEntrySize = 7;
+constexpr int kLiveryEntrySize = 7;
 constexpr int kMotorsportEntryCountOffset = 58;
 constexpr int kMotorsportEntriesOffset = 62;
-constexpr quint32 kDefaultPaintSelector = 0xffffffffu;
+constexpr int kEarlyEntryCountOffset = 41;
+constexpr int kTaggedLiveryOverhead = 40;
+constexpr quint32 kLastEarlyLiveryVersion = 7;
 constexpr quint32 kDefaultPaintFinish = 0;
+constexpr quint32 kDefaultPaintSelector = 0xffffffffu;
 constexpr double kNativeFramePositionRange = 25000.0;
 constexpr double kNativeFrameScaleRange = 100.0;
 
@@ -59,8 +62,12 @@ ExportProfile exportProfile(ExportGameVersion game) {
         return {0, 2, kEarlySections, 20, GroupRecordGeneration::First};
     case ExportGameVersion::Motorsport6:
         return {0, 5, kEarlySections, 30, GroupRecordGeneration::First};
-    case ExportGameVersion::Horizon5:
+    case ExportGameVersion::Motorsport7:
+        return {2, 7, kEarlySections, 30, GroupRecordGeneration::Second};
+    case ExportGameVersion::Horizon4:
         return {4, 17, kHorizon5Sections, kPaintRecordCount, GroupRecordGeneration::Current};
+    case ExportGameVersion::Horizon5:
+        return {6, 18, kHorizon5Sections, kPaintRecordCount, GroupRecordGeneration::Current};
     case ExportGameVersion::Motorsport2023:
         return {9, 19, kMotorsportSections, kPaintRecordCount, GroupRecordGeneration::Current};
     default:
@@ -126,38 +133,67 @@ QByteArray nativeHeader(const Project &project, ExportGameVersion game,
     metadata.carId = project.isLivery ? static_cast<quint32>(project.carId) : 0;
     metadata.hasCarId = motorsport || project.isLivery;
     metadata.creatorTag = creatorTag;
+    metadata.fieldBlock = metadata.fieldBlock.left(16);
+    metadata.fieldBlock.append(QByteArray(16 - metadata.fieldBlock.size(), '\0'));
+    metadata.fieldBlock.replace(12, 4, QByteArray(project.isLivery ? "\x03\0\0\0" : "\x02\0\0\0", 4));
     if (profile.headerVersion <= 1) {
         const int identifierSize = 8;
-        metadata.fieldBlock = metadata.fieldBlock.left(16);
-        metadata.fieldBlock.append(QByteArray(16 - metadata.fieldBlock.size(), '\0'));
-        metadata.fieldBlock.replace(12, 4, QByteArray(project.isLivery ? "\x03\0\0\0" : "\x02\0\0\0", 4));
         if (metadata.guid.size() != identifierSize || sourceVersion != profile.headerVersion) {
             metadata.guid = nativeGuidBytes(QUuid::createUuid()).left(identifierSize);
         }
         metadata.sectionPrefix = QByteArray(16, '\0');
         metadata.sectionPrefix.replace(12, 4, QByteArray(4, '\xff'));
         metadata.sectionMarker.clear();
-        metadata.sectionPadding = QByteArray(static_cast<int>(profile.headerVersion), '\0');
+        metadata.sectionPadding = QByteArray(static_cast<int>(profile.headerVersion), '\x01');
         metadata.category.reset();
+        if (profile.headerVersion == 0) {
+            metadata.guid = QByteArray(identifierSize, '\xff');
+        }
+        if (game == ExportGameVersion::Motorsport5 || game == ExportGameVersion::Horizon2
+            || (game == ExportGameVersion::Horizon3 && !project.isLivery)) {
+            metadata.trailing = QByteArray(project.isLivery ? 2 : 6 - profile.headerVersion, '\0');
+            if (!project.isLivery) {
+                metadata.trailing.append(QByteArray(4, '\xff'));
+                metadata.trailing.append(metadata.sectionPadding);
+            }
+            detail::appendLeU32(metadata.trailing, project.isLivery ? metadata.carId : shapeCount);
+            metadata.trailing.append(QByteArray(identifierSize, '\xff'));
+        }
 
         return buildHeader(metadata);
     }
-    if (metadata.guid.size() != 16 || metadata.formatVersion != sourceVersion) {
+    if (metadata.guid.size() != 16) {
         metadata.guid = nativeGuidBytes(QUuid::createUuid());
     }
     if (motorsport && !folderId.isNull()) {
         metadata.guid = nativeGuidBytes(folderId);
     }
     metadata.sectionPrefix = QByteArray(28, '\0');
-    metadata.sectionPrefix[0] = '\x01';
-    metadata.sectionPrefix.replace(12, 16, metadata.guid);
-    metadata.sectionMarker = motorsport ? QByteArray("\x01\x02", 2) : QByteArray("\x01\x01", 2);
-    metadata.sectionPadding = QByteArray(motorsport ? 7 : 3, '\0');
+    metadata.sectionMarker = profile.headerVersion == 2
+        ? QByteArray(1, '\x01') : QByteArray("\x01\x02", 2);
+    metadata.sectionPadding = QByteArray(profile.headerVersion == 2 ? 0 : motorsport ? 7 : 3, '\0');
     if (motorsport) {
+        metadata.sectionPrefix[0] = '\x01';
+        metadata.sectionPrefix.replace(12, 16, metadata.guid);
         metadata.sectionPadding[3] = '\x01';
         metadata.category = metadata.category.value_or(kDefaultMotorsportCategory);
     } else {
         metadata.category.reset();
+        if (profile.headerVersion == 2) {
+            metadata.trailing = QByteArray(project.isLivery ? 7 : 11, '\0');
+            metadata.trailing.append('\x01');
+            detail::appendLeU32(metadata.trailing, shapeCount);
+            if (project.isLivery) {
+                detail::appendLeU32(metadata.trailing, metadata.carId);
+            }
+            metadata.trailing.append(QByteArray(16, '\0'));
+        } else {
+            metadata.trailing = QByteArray(project.isLivery ? 14 : 2, '\0');
+            if (!project.isLivery) {
+                detail::appendLeU32(metadata.trailing, shapeCount);
+                metadata.trailing.append(QByteArray(16, '\0'));
+            }
+        }
     }
 
     return buildHeader(metadata);
@@ -200,7 +236,8 @@ QByteArray legacyPaintBlock(const Project &project, const ExportProfile &profile
         record[0] = '\x01';
         record[1] = '\x01';
         QByteArray paintDefaults;
-        detail::appendLeU32(paintDefaults, kDefaultPaintSelector);
+        const bool selectable = (index >= 5 && index <= 7) || index >= 12;
+        detail::appendLeU32(paintDefaults, selectable ? kDefaultPaintSelector : 0);
         detail::appendLeU32(paintDefaults, kDefaultPaintFinish);
         record.replace(27, paintDefaults.size(), paintDefaults);
         paint.append(record);
@@ -341,7 +378,12 @@ QByteArray earlyArtwork(const Project &project, const ExportProfile &profile,
             artwork.append(QByteArray(7, '\0'));
             continue;
         }
-        const QByteArray group = buildNestedPayload(section, {}, GroupRecordGeneration::First, false);
+        if (scale == 1.0) {
+            section.root = std::unique_ptr<scene::Group>(
+                static_cast<scene::Group *>(section.root->takeAt(0).release()));
+        }
+        section.sourceDecPrefix.clear();
+        const QByteArray group = buildNestedPayload(section, {}, GroupRecordGeneration::First, false, true);
         artwork.append(group.mid(kStandaloneRootCountOffset, kSectionRootHeaderSize));
         if (scale > 1.0) {
             artwork.append('\x01');
@@ -358,6 +400,9 @@ QByteArray earlyArtwork(const Project &project, const ExportProfile &profile,
             artwork.append('\0');
         }
     }
+    if (counts[profile.sectionCount - 1] == 0) {
+        artwork.chop(17);
+    }
 
     return artwork;
 }
@@ -365,7 +410,7 @@ QByteArray earlyArtwork(const Project &project, const ExportProfile &profile,
 QByteArray nativeArtwork(const Project &project, const ExportProfile &profile,
                          std::array<int, 11> &counts) {
     const Project artworkProject = nativeArtworkProject(project, profile);
-    if (profile.headerVersion <= 1) {
+    if (profile.liveryVersion <= kLastEarlyLiveryVersion) {
         return earlyArtwork(artworkProject, profile, counts);
     }
 
@@ -380,7 +425,7 @@ QByteArray nativeLiveryPayload(const Project &project, ExportGameVersion game,
     }
     const bool motorsport = game == ExportGameVersion::Motorsport2023;
     const ExportProfile profile = exportProfile(game);
-    const bool early = profile.headerVersion <= 1;
+    const bool early = profile.liveryVersion <= kLastEarlyLiveryVersion;
     const bool tagged = profile.liveryVersion != 2;
     const QByteArray paint = legacyPaintBlock(project, profile);
     const QByteArray artwork = nativeArtwork(project, profile, counts);
@@ -393,11 +438,24 @@ QByteArray nativeLiveryPayload(const Project &project, ExportGameVersion game,
     quint32 entryCount = 0;
     if (motorsport && sourceMotorsport) {
         entryCount = detail::readLeU32(source, kMotorsportEntryCountOffset);
-        const quint64 entriesSize = static_cast<quint64>(entryCount) * kMotorsportEntrySize;
+        const quint64 entriesSize = static_cast<quint64>(entryCount) * kLiveryEntrySize;
         if (entriesSize + kMotorsportArtworkOffset != static_cast<quint64>(sourceArtwork)) {
             throw std::runtime_error("invalid Motorsport livery entry metadata");
         }
         sourceEntries = source.mid(kMotorsportEntriesOffset, static_cast<qsizetype>(entriesSize));
+    } else if (early && profile.liveryVersion >= 5 && sourceArtwork >= kEarlyEntryCountOffset + 8
+        && detail::readLeU32(source, 4) == 1
+        && detail::readLeU32(source, 29) == profile.liveryVersion) {
+        const int entryCountOffset = kEarlyEntryCountOffset + (profile.liveryVersion >= 6 ? 1 : 0);
+        const quint32 sourceEntryCount = detail::readLeU32(source, entryCountOffset);
+        const quint64 entriesSize = static_cast<quint64>(sourceEntryCount) * kLiveryEntrySize;
+        const int sourcePaintSize = source.size() - sourceArtwork
+            - static_cast<int>(detail::readLeU32(source, sourceArtwork - 4)) - kTaggedLiveryOverhead;
+        if (entriesSize + entryCountOffset + 8 == static_cast<quint64>(sourceArtwork)
+            && sourcePaintSize == 1 + profile.paintRecordCount * kPaintRecordSize + 2) {
+            entryCount = sourceEntryCount;
+            sourceEntries = source.mid(entryCountOffset + 4, static_cast<qsizetype>(entriesSize));
+        }
     }
 
     detail::appendLeU32(payload, motorsport ? 2 : 1);
@@ -422,10 +480,11 @@ QByteArray nativeLiveryPayload(const Project &project, ExportGameVersion game,
         detail::appendLeU32(payload, 1);
         payload.append('\0');
     } else if (profile.liveryVersion >= 5) {
-        if (profile.liveryVersion == 6) {
-            payload.append('\0');
+        if (profile.liveryVersion >= 6) {
+            payload.append('\x01');
         }
-        detail::appendLeU32(payload, 0);
+        detail::appendLeU32(payload, entryCount);
+        payload.append(sourceEntries);
     }
     detail::appendLeU32(payload, static_cast<quint32>(artwork.size()));
     payload.append(artwork);
@@ -442,7 +501,7 @@ QByteArray nativeLiveryPayload(const Project &project, ExportGameVersion game,
     if (tagged) {
         payload.append("yrvl", 4);
     }
-    if (motorsport) {
+    if (motorsport || game == ExportGameVersion::Horizon5) {
         detail::appendLeU32(payload, 0);
     }
 

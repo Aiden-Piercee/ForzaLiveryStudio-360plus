@@ -240,8 +240,6 @@ void MainWindow::rebuildSectionBar() {
 void MainWindow::setActiveSection(const QString &sectionGroupId) {
     state_->setActiveSectionId(sectionGroupId);
 
-    applyLiverySectionVisibility(sectionGroupId);
-
     treeModel_->setProjectSection(&state_->project_, sectionGroupId);
 
     state_->clearSelection();
@@ -274,7 +272,6 @@ void MainWindow::prebakeLiverySectionCaches() {
     const QSet<QString> restoreGuideSelection = state_->selectedGuideLayerIds_;
     for (const QString &sectionId : sectionIds) {
         state_->setActiveSectionId(sectionId);
-        applyLiverySectionVisibility(sectionId);
         treeModel_->setProjectSection(&state_->project_, sectionId);
         canvas_->refitView();
         canvas_->invalidateSelectionCache();
@@ -282,7 +279,6 @@ void MainWindow::prebakeLiverySectionCaches() {
     }
 
     state_->setActiveSectionId(restoreSectionId);
-    applyLiverySectionVisibility(restoreSectionId);
     treeModel_->setProjectSection(&state_->project_, restoreSectionId);
     state_->selectedLayerIds_ = restoreLayerSelection;
     state_->selectedGuideLayerIds_ = restoreGuideSelection;
@@ -325,17 +321,6 @@ int MainWindow::activeLiverySectionSlot() const {
         }
     }
     return -1;
-}
-
-void MainWindow::applyLiverySectionVisibility(const QString &sectionGroupId) {
-    if (state_ == nullptr || !state_->hasProject_ || sectionGroupId.isEmpty()) {
-        return;
-    }
-    const QVector<QString> activeLeaves = state_->leafLayerIdsForEntry(sectionGroupId);
-    const QSet<QString> activeSet(activeLeaves.begin(), activeLeaves.end());
-    forEachShape(state_->project_, [&](fls::scene::Shape &layer) {
-        layer.visible = activeSet.contains(layer.id);
-    });
 }
 
 void MainWindow::updateStatus() {

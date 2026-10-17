@@ -107,7 +107,6 @@ private:
     void prebakeLiverySectionCaches();
     QString activeLiverySectionId() const;
     int activeLiverySectionSlot() const;
-    void applyLiverySectionVisibility(const QString &sectionGroupId);
     void updateCarUnwrapOverlay();
     void exportDialog();
     bool exportFolderImpl(const QString &folder, fls::ExportGameVersion game, QString *error,

@@ -14,7 +14,7 @@ u32       uncompressed length
 byte[]    zlib payload
 ```
 
-The decompressed stream is a tagged sequence:
+The decompressed FH6 stream is a tagged sequence:
 
 ```text
 vlrc      root metadata
@@ -30,7 +30,7 @@ in the preceding livery-information record.
 
 ## Root Metadata
 
-The `vlrc` record begins with:
+The shared `vlrc` fields begin with:
 
 ```text
 0x00  byte[4]  "vlrc"
@@ -39,8 +39,12 @@ The `vlrc` record begins with:
 0x0c  u32      reserved
 0x10  u32      target car identifier
 0x14  u32      category state
-0x18  u16      reserved
 ```
+
+Root-version-1 streams have one state byte at `0x18`, followed by `yrvl` at
+`0x19`. FH6 root-version-2 streams have two bytes at `0x18`, followed by `yrvl`
+at `0x1a`. Motorsport 2023 also uses root version 2, with an extended prefix
+placing `yrvl` at `0x29`. The root version alone does not select the layout.
 
 The editor reads the target car identifier and preserves the remaining source
 metadata during source-backed encoding.
@@ -94,7 +98,7 @@ when a structurally valid successor group follows directly, through one control
 byte, or through the framed livery trailer. Markerless section wrappers can also
 carry the first-child transform directly after their bitmap.
 
-The current encoder reserves markerless framing for section roots. Artwork
+The FH6 encoder reserves markerless framing for section roots. Artwork
 groups use counted `20` or `60` headers, including groups reconstructed from a
 markerless source frame. The first shape in a counted group uses the explicit
 `01 02` lead.
@@ -104,9 +108,9 @@ shape or terminal group child, while inherited mask-group state remains
 authoritative. Every shape inheriting a `60` group carries an explicit `01 02`
 lead, including the group's first shape.
 
-When a shape follows a group, its record begins with exactly one state byte
+For FH4, FH5, and FH6, a shape following a group begins with one state byte
 (`00` or `01`) followed by `02`. Counted group boundaries close the preceding
-nesting, so this transition does not carry one unwind byte per group depth.
+nesting. The next shape record starts directly after the terminal child payload.
 Shape leads reflect traversal state across group boundaries. A markerless root
 can begin with the bare `02` form.
 
@@ -119,7 +123,7 @@ bytes and transforms stay intact. Import remains tolerant of these records.
 
 ## Sections
 
-The Horizon artwork stream contains eleven ordered section slots:
+The FH6 artwork stream contains eleven ordered section slots:
 
 ```text
 Front
@@ -197,10 +201,13 @@ weight from the section metadata before building the final scene.
 The `yrvl` record preceding the artwork stores creator metadata, state, and the
 `gyvl` body length. The length must match the emitted artwork chunk.
 
-The section-counter record following the artwork stores eleven section counts and
+The FH6 section-counter record following the artwork stores eleven section counts and
 one trailing counter. The decoder uses the section counts to bound and validate
 the artwork walk. The encoder rebuilds these counts from the exported section
 contents.
+
+Older formats use seven counters, including the trailing counter. Section slots
+without declared artwork remain empty in the decoded scene.
 
 If trailing mask state belongs to the final shape in a section, a standalone `01`
 marker follows the completed section walk. The decoder applies it to that terminal
@@ -208,7 +215,7 @@ shape before advancing to the section remnant.
 
 ## Descriptor Table
 
-The descriptor chunk contains paint bindings, panel records, and raster graphic
+The FH6 descriptor chunk contains paint bindings, panel records, and raster graphic
 references. Its structurally decoded record table has this layout:
 
 ```text
@@ -272,25 +279,46 @@ FH6 retains its eleven artwork sections and hashed paint descriptors.
 | FH3 | 1 | 6 | 6 | 30 |
 | FM5 | 0 | 2 | 6 | 20 |
 | FM6 | 0 | 5 | 6 | 30 |
-| FH5 | 4 | 17 | 6 | 34 |
+| FM7 | 2 | 7 | 6 | 30 |
+| FH4 | 4 | 17 | 6 | 34 |
+| FH5 | 6 | 18 | 6 | 34 |
+| FH6 | 7 | 19 | 11 | Variable (hashed) |
 | FM2023 | 9 | 19 | 7 | 34 |
+
+FH6 stores a counted table of 27-byte hashed paint records. Its record count
+depends on the material bindings carried by the livery.
+
+The table specifies the selected export profiles. Import also accepts older
+layouts present in game saves, including FH5 header version 4 with livery
+information version 17 and Motorsport 2023 livery information version 18.
 
 The six body sections are Front, Back, Top, Left, Right, and Spoiler. Window
 artwork is discarded for every target except FH6. FM2023 retains an empty seventh
-wire slot. These targets write seven section counters. FM5 stores counters and
+wire slot. The non-FH6 targets write seven section counters; FH6 writes eleven
+section counters and one trailing counter. FM5 stores counters and
 paint directly after its length-delimited artwork; later formats frame these
-blocks with `yrvl` tags. FH2, FH3, FM5, and FM6 use `01` shape markers in embedded
+blocks with `yrvl` tags. FH2, FH3, FM5, FM6, and FM7 use bare `01` shape markers in embedded
 artwork. Their decoder supplies virtual terminal padding for the section walker.
 Their populated sections use seventeen-byte separators. Opaque legacy logo
 records retain structural occupancy during decoding and are omitted from export.
+Their group frames can contain an unmarked sixteen-byte transform followed by
+a control byte and markerless group header. The decoder resolves this layout
+before treating an arbitrary float byte as an opaque transform lead.
+Livery information versions 5 through 7 contain a counted table of seven-byte
+entries before the artwork length. Versions 6 and 7 place a state byte before
+the count; observed values include `00` and `01`. The exporter selects `01`.
+Compatible entry tables are retained, while unmatched tables are exported empty.
+FH5 appends a zero `u32` after the final `yrvl` tag.
 FM2023 uses independently compressed blocks of at most 32768 uncompressed bytes.
 
 Positional paint chunks contain a status byte, fixed-size 40-byte records, and a
 two-byte tail. Compatible imported chunks are retained intact. Unmatched paint
-data is discarded, and export supplies native inherited records with manufacturer
-selector `0xffffffff` and finish `0`. These formats have no material-hash field;
+data is discarded, and export supplies native inherited records with slot-specific
+manufacturer selectors `0` or `0xffffffff` and finish `0`. These formats have no material-hash field;
 hashed editor bindings without a positional mapping are omitted.
-Older targets rebuild counted groups with baked placements and a shared section
-scale. FH5 and FM2023 retain compatible native framing; placement and color edits
+Older targets rebuild group frames with relative placements and a shared section
+scale. FH4, FH5, and FM2023 retain compatible native framing; placement and color edits
 are patched relative to the retained group transforms.
-Rebuilt artwork is decoded and checked against the scene before export.
+The modern section builder decodes rebuilt artwork and checks its occupancy
+before export. Regression tests compare imported and exported scene geometry
+independently of the selected record framing.

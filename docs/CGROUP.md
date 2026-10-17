@@ -214,6 +214,10 @@ u8  r
 u8  a
 ```
 
+Shape-record recognition validates Y scale and skew together through the
+represented affine basis and its relative shear. Placement values and basis
+components must remain finite and within the decoder's geometric bounds.
+
 Standalone streams identify their record generation in the root transform
 marker. Generations 1 and 2 use `01` for shape records. Generation 1 uses `01`
 as its transform terminator, generation 2 uses `02`, and generation 3 uses the
@@ -229,9 +233,17 @@ Generations 1 and 2 use odd record and transform leads as traversal framing. The
 parity does not carry trailing mask state. Generation 3 assigns trailing mask
 state to the contextual odd leads described below.
 
-PGS export uses generation 1 for FH2, FM5, and FM6, generation 2 for FH3,
-and generation 3 for FH5 and FH6. Older exports retain the counted hierarchy
-and bake group transforms into shape placements.
+PGS export uses generation 1 for FH2, FM5, and FM6, generation 2 for FH3 and FM7,
+and generation 3 for FH4, FH5, and FH6. All generations encode group transform
+frames and relative shape placements. Both older generations use `01` shape
+markers. Generation 1 writes bare shape records; generation 2 can place closing
+controls before a shape, producing the framed `01 01` form.
+Generation 1 writes a `00` root group marker and uses `01` transform
+markers followed by a control byte and markerless group headers. Its standalone
+stream has no closing trailer. Generation 2 writes a `20` root marker, uses `02`
+transform terminators, and emits `01` closing controls according to group depth.
+These are export choices. Import selects the dialect from each stream's root
+marker; game saves can retain earlier generations, including generation 1 in FH3.
 
 Built-in vector IDs are canonicalized and validated against the runtime registry
 in `assets/vector/shape_names.json`. A complete unsupported livery record can

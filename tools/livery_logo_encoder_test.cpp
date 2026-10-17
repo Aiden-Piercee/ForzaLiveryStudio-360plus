@@ -896,6 +896,10 @@ bool testSourceGroupHeaderPreservation() {
     framedSource.replace(bodyStart + originalFirst->absPos - 8, 4, mirroredScaleX);
     framedSource.insert(bodyStart + originalFirst->absPos, mirroredScaleY);
     framedSource.remove(bodyStart + originalSecond->absPos + mirroredScaleY.size(), 1);
+    QByteArray artworkSize;
+    fls::detail::appendLeU32(artworkSize,
+        fls::detail::readLeU32(original.raw, original.gyvlOffset - 4) + mirroredScaleY.size() - 1);
+    framedSource.replace(original.gyvlOffset - 4, 4, artworkSize);
     fls::writeCGroupFile(
         QDir(temporary.path()).filePath(QStringLiteral("C_livery")), framedSource);
 

@@ -95,6 +95,8 @@ The import/export for groups is fully supported, core functionality in place. So
 |-------------|----------------|---------------| 
 | Horizon 6   | Import/Export  | Import/Export |
 | Horizon 5   | Import         | Import        |
+| Horizon 2   | Import/Export  | Import/Export |
+| Motosport 5 | Import/Export  | Import/Export |
 | Motosport 23| Import         | Import        |
 
 ## Documentation

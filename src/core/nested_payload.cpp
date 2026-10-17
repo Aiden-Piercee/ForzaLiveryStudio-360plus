@@ -53,6 +53,7 @@ struct ExportContext {
     const Project &project;
     SpriteSizeFn spriteSize;
     GroupRecordGeneration generation = GroupRecordGeneration::Current;
+    bool embeddedLivery = false;
 };
 
 struct ExportShape {
@@ -100,7 +101,7 @@ QByteArray packShapeRelative(const ExportShape &shape, double offsetX, double of
     QByteArray out;
     const char marker = generation == GroupRecordGeneration::Current ? '\x02' : '\x01';
     out.reserve(32);
-    if (bare && generation == GroupRecordGeneration::Current) {
+    if (bare || generation != GroupRecordGeneration::Current) {
         out.append(marker);
     } else {
         out.append(static_cast<char>(firstMarker));
@@ -172,6 +173,34 @@ QByteArray siblingGroupTransformMarker(int previousGroupDepth) {
     out.append(QByteArray(std::max(1, previousGroupDepth), '\x01'));
     out.append('\x03');
     return out;
+}
+
+QByteArray groupTransformMarker(GroupRecordGeneration generation, bool previousWasGroup,
+                                int previousGroupDepth, bool hasPreviousSibling) {
+    if (generation == GroupRecordGeneration::First) {
+        return QByteArray(1, '\x01');
+    }
+    if (generation == GroupRecordGeneration::Second) {
+        QByteArray marker(previousWasGroup ? std::max(1, previousGroupDepth) : 0, '\x01');
+        marker.append('\x02');
+
+        return marker;
+    }
+    if (previousWasGroup) {
+        return siblingGroupTransformMarker(previousGroupDepth);
+    }
+
+    return hasPreviousSibling ? QByteArray("\x00\x03", 2) : QByteArray(1, '\x03');
+}
+
+void appendGroupShapeTransition(QByteArray &out, int previousGroupDepth,
+                                GroupRecordGeneration generation) {
+    if (generation == GroupRecordGeneration::Current) {
+        out.append('\x00');
+        out.append(QByteArray(std::max(0, previousGroupDepth - 1), '\x01'));
+    } else if (generation == GroupRecordGeneration::Second) {
+        out.append(QByteArray(std::max(1, previousGroupDepth), '\x01'));
+    }
 }
 
 QPointF spriteHalfExtents(const ExportContext &ctx, quint16 shapeId) {
@@ -353,28 +382,25 @@ QByteArray packNestedGroup(const ExportContext &ctx, const GroupEntry &entry,
     const bool isMaskGroup = entryAllMasked(entry);
     const bool childMask = parentMask || isMaskGroup;
     const bool currentGeneration = ctx.generation == GroupRecordGeneration::Current;
-    const QPointF origin = currentGeneration ? entryOrigin(ctx, entry) : parentOffset;
-    QByteArray nativeMarker = transformMarker;
-    nativeMarker.back() = static_cast<char>(ctx.generation);
-    QByteArray out = currentGeneration
-        ? packTranslationTransform(origin.x() - parentOffset.x(), origin.y() - parentOffset.y(), nativeMarker)
-        : QByteArray();
-    out.append(packGroupHeader(children.size(), childBitmap(children, "group", ctx.generation),
-                               isMaskGroup ? 0x60 : 0x20, "group"));
+    const QPointF origin = entryOrigin(ctx, entry);
+    const QByteArray nativeMarker = ctx.embeddedLivery ? QByteArray() : transformMarker;
+    const QByteArray header = packGroupHeader(children.size(), childBitmap(children, "group", ctx.generation),
+                                             isMaskGroup ? 0x60 : 0x20, "group");
+    QByteArray out = packTranslationTransform(origin.x() - parentOffset.x(), origin.y() - parentOffset.y(), nativeMarker);
+    if (ctx.generation == GroupRecordGeneration::First && !isMaskGroup && children.size() > 1) {
+        out.append('\0');
+        out.append(header.mid(1));
+    } else {
+        out.append(header);
+    }
 
     bool previousWasGroup = false;
     int previousGroupDepth = 0;
     QString previousSiblingId;
     for (const GroupEntry &child : children) {
         if (child.kind == GroupEntry::Group || child.kind == GroupEntry::Virtual) {
-            QByteArray marker;
-            if (previousWasGroup) {
-                marker = siblingGroupTransformMarker(previousGroupDepth);
-            } else if (!previousSiblingId.isEmpty()) {
-                marker = QByteArray("\x00\x03", 2);
-            } else {
-                marker = QByteArray("\x03", 1);
-            }
+            QByteArray marker = groupTransformMarker(ctx.generation, previousWasGroup,
+                                                     previousGroupDepth, !previousSiblingId.isEmpty());
             marker = maybeFlipMaskFlag(marker, previousShapeMask);
             previousShapeMask = false;
             out.append(packNestedGroup(ctx, child, origin, marker, childMask, previousShapeMask));
@@ -387,9 +413,8 @@ QByteArray packNestedGroup(const ExportContext &ctx, const GroupEntry &entry,
             if (!child.shape->visible) {
                 throw std::runtime_error("grouped export cannot encode a hidden child inside a visible group");
             }
-            if (previousWasGroup && currentGeneration) {
-                out.append('\x00');
-                out.append(QByteArray(std::max(0, previousGroupDepth - 1), '\x01'));
+            if (previousWasGroup) {
+                appendGroupShapeTransition(out, previousGroupDepth, ctx.generation);
             }
             const ExportShape packed = exportShape(*child.shape);
             const quint8 lead = currentGeneration && (previousWasGroup || previousShapeMask) ? 0x01 : 0x00;
@@ -435,8 +460,9 @@ QByteArray rootCloseBytes(const QVector<GroupEntry> &items) {
 } // namespace
 
 QByteArray buildNestedPayload(const Project &project, const SpriteSizeFn &spriteSize,
-                             GroupRecordGeneration generation, bool centerArtwork) {
-    ExportContext ctx{project, spriteSize, generation};
+                             GroupRecordGeneration generation, bool centerArtwork,
+                             bool embeddedLivery) {
+    ExportContext ctx{project, spriteSize, generation, embeddedLivery};
     QVector<GroupEntry> items = rootItems(project);
     items.erase(std::remove_if(items.begin(), items.end(), [](const GroupEntry &entry) {
                     return entry.kind == GroupEntry::Layer && (entry.shape == nullptr || !entry.shape->visible);
@@ -467,7 +493,7 @@ QByteArray buildNestedPayload(const Project &project, const SpriteSizeFn &sprite
 
     const QByteArray rootBitmap = childBitmap(items, "root", generation);
     QByteArray payload = prefix;
-    payload.append('\x20');
+    payload.append(generation == GroupRecordGeneration::First ? '\0' : '\x20');
     appendLeU16(payload, static_cast<quint16>(items.size()));
     appendLeU16(payload, static_cast<quint16>(rootBitmap.size()));
     payload.append(QByteArray(2, '\x00'));
@@ -479,14 +505,8 @@ QByteArray buildNestedPayload(const Project &project, const SpriteSizeFn &sprite
     QString previousSiblingId;
     for (const GroupEntry &item : items) {
         if (item.kind == GroupEntry::Group) {
-            QByteArray marker;
-            if (previousWasGroup) {
-                marker = siblingGroupTransformMarker(previousGroupDepth);
-            } else if (!previousSiblingId.isEmpty()) {
-                marker = QByteArray("\x00\x03", 2);
-            } else {
-                marker = QByteArray("\x03", 1);
-            }
+            QByteArray marker = groupTransformMarker(generation, previousWasGroup,
+                                                     previousGroupDepth, !previousSiblingId.isEmpty());
             marker = maybeFlipMaskFlag(marker, previousShapeMask);
             previousShapeMask = false;
             payload.append(packNestedGroup(ctx, item, center, marker, false, previousShapeMask));
@@ -496,9 +516,8 @@ QByteArray buildNestedPayload(const Project &project, const SpriteSizeFn &sprite
             if (item.shape == nullptr) {
                 continue;
             }
-            if (previousWasGroup && generation == GroupRecordGeneration::Current) {
-                payload.append('\x00');
-                payload.append(QByteArray(std::max(0, previousGroupDepth - 1), '\x01'));
+            if (previousWasGroup) {
+                appendGroupShapeTransition(payload, previousGroupDepth, generation);
             }
             const ExportShape packed = exportShape(*item.shape);
             const quint8 lead = generation == GroupRecordGeneration::Current
@@ -512,6 +531,8 @@ QByteArray buildNestedPayload(const Project &project, const SpriteSizeFn &sprite
     }
     if (generation == GroupRecordGeneration::Current) {
         payload.append(maybeFlipMaskFlag(rootCloseBytes(items), previousShapeMask));
+    } else if (generation == GroupRecordGeneration::Second) {
+        payload.append(rootCloseBytes(items).mid(1));
     }
     return payload;
 }

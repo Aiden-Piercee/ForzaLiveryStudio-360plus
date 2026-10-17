@@ -18,7 +18,9 @@ by a UTF-16LE description and the published metadata fields.
 
 ## Draft Layout
 
-The draft fields following the zero description length are:
+The common date and creator fields follow the description field in both draft
+and published headers. The following tail diagram describes versions 4, 6, 7,
+and 9; the older layouts are described separately below:
 
 ```text
 u16       year
@@ -44,16 +46,21 @@ the decal total, an optional livery car identifier, and an eight-byte asset
 identifier. The asset type in the metadata field block determines whether the
 car identifier is present. Remaining bytes are retained as trailing metadata.
 
-FH5 headers use versions 4 and 6, with a five-byte or nine-byte marker-and-padding
-block according to the section-prefix layout. Their car identifier is optional;
-native livery drafts include it and group drafts omit it. FH6 uses version 7 and a
-nine-byte marker-and-padding block. Motorsport uses version 9, a nine-byte
+FM7 uses version 2 with a twenty-eight-byte prefix and a one-byte `01` marker
+before the decal total. Its asset identifier is sixteen bytes.
+FH4 uses version 4. FH5 imports contain versions 4 and 6; the exporter selects
+version 6. Both layouts use a five-byte marker-and-padding block. Their car
+identifier is optional; the asset type in the metadata field
+block selects it for liveries and omits it for groups. FH6 uses version 7 and a
+nine-byte marker-and-padding block. Motorsport 2023 uses version 9, a nine-byte
 marker-and-padding block, and a category preceding the type value. Its car
 identifier follows the type value.
 
 The metadata field block, creator identity tag, section prefix, marker padding, GUID, and trailing
 data are preserved by the editor. Livery export synchronizes the target car
 identifier and decal total with the embedded container metadata.
+Trailing metadata has variable length and can contain repeated identity and
+count fields. Its presence and length do not determine the core header layout.
 
 ## Published Layout
 
@@ -71,6 +78,7 @@ GUID, and initialized opaque blocks.
 Imported header bytes remain attached to the project. Group export converts
 published metadata to a draft header, clears the description, synchronizes the
 decal total, and uses the destination save-profile identity before writing the
-output folder. Livery export writes edited names and creators while retaining the
-remaining decoded header fields. Projects without an imported header receive a
-generated draft header.
+output folder. Native target export selects the destination layout, normalizes
+publication metadata, and retains compatible identity fields. Opaque fields
+without a compatible destination representation receive the target defaults.
+Projects without an imported header receive a generated draft header.

@@ -87,9 +87,7 @@ bool isShapePayloadAt(const QByteArray &data, int idPos, int transformPos, int e
 
     return std::isfinite(rotation) && std::abs(rotation) <= 10000.0
         && std::abs(px) < 50000.0 && std::abs(py) < 50000.0
-        && std::abs(sx) > 1e-6 && std::abs(sx) < 200.0
-        && std::abs(sy) > 1e-6 && std::abs(sy) < 5000.0
-        && std::isfinite(skew) && std::abs(skew) < 200.0;
+        && detail::isValidVinylShapeBasis(sx, sy, skew);
 }
 
 void setNodeTransform(VinylGroup &node, const Transform &transform) {
@@ -176,9 +174,7 @@ int unsupportedShapeRecordSizeAt(const QByteArray &data, int pos, int end, quint
     const double skew = readLeFloat(data, pos + transformOffset + 20);
     const bool valid = std::isfinite(rotation) && std::abs(rotation) <= 10000.0
         && std::abs(px) < 50000.0 && std::abs(py) < 50000.0
-        && std::abs(sx) > 1e-6 && std::abs(sx) < 200.0
-        && std::abs(sy) > 1e-6 && std::abs(sy) < 5000.0
-        && std::isfinite(skew) && std::abs(skew) < 200.0;
+        && detail::isValidVinylShapeBasis(sx, sy, skew);
 
     return valid ? recordSize : 0;
 }
@@ -815,6 +811,8 @@ bool liveryTransformEndsAtGroup(const QByteArray &data, int pos, int end, quint8
     return false;
 }
 
+std::optional<TransformRecord> readUnmarkedLiveryTransform(const QByteArray &data, int pos, int end);
+
 std::optional<TransformRecord> readLiveryTransform(const QByteArray &data, int pos, int end,
                                                    bool invertOddRotation, quint8 shapeMarker) {
     if (pos >= end) {
@@ -825,6 +823,10 @@ std::optional<TransformRecord> readLiveryTransform(const QByteArray &data, int p
     }
 
     const quint8 lead = static_cast<quint8>(data[pos]);
+    if (shapeMarker == kLegacyShapeMarker && lead > 0x01
+        && readUnmarkedLiveryTransform(data, pos, end)) {
+        return std::nullopt;
+    }
     const bool recognizedFlag = lead == 0x01 || lead == 0x02 || lead == 0x03
         || lead == 0x0f || lead == 0x60 || lead == 0xff;
     if (recognizedFlag && !liveryTransformEndsAtGroup(data, pos, end, shapeMarker)
@@ -1665,6 +1667,23 @@ QVector<QString> VinylTreeDecoder::validateTree(const VinylGroup &root) const {
     };
     visit(root, QStringLiteral("root"));
     return errors;
+}
+
+bool detail::isValidVinylShapeBasis(double scaleX, double scaleY, double skew) {
+    constexpr double kMinimumBasisLength = 1e-6;
+    constexpr double kMaximumScaleX = 200.0;
+    constexpr double kMaximumScaleY = 5000.0;
+    constexpr double kMaximumRelativeShear = 200.0;
+    const double xLength = std::abs(scaleX);
+    const double yScale = std::abs(scaleY);
+    const double shear = skew * scaleY;
+    const double yLength = std::hypot(scaleY, shear);
+    const double shearLimit = kMaximumRelativeShear * std::max(1.0, yScale);
+
+    return std::isfinite(scaleX) && std::isfinite(scaleY) && std::isfinite(skew)
+        && xLength > kMinimumBasisLength && xLength < kMaximumScaleX
+        && yScale > 0.0 && yScale < kMaximumScaleY
+        && yLength > kMinimumBasisLength && std::abs(shear) < shearLimit;
 }
 
 LayerData getLayerData(const QByteArray &payload) {

@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <exception>
+#include <functional>
 
 namespace {
 
@@ -399,6 +400,43 @@ bool testLiveryLockedTransformFrames() {
         && validTransform(masked) && validTransform(plain);
 }
 
+bool testUnmarkedLegacyLiveryTransform() {
+    QByteArray body;
+    appendMarkerlessGroupHeader(body, 2, 0x02);
+    appendShape(body, kLegacyShapeMarker, false);
+    body.append(QByteArray::fromHex("80ad524036d5b142120f1e3fbccc7e42"));
+    body.append('\0');
+    appendMarkerlessGroupHeader(body, 2, 0x00);
+    appendShape(body, kLegacyShapeMarker, false);
+    appendShape(body, kLegacyShapeMarker, false);
+    fls::VinylDecoderOptions options;
+    options.legacyLiveryRecords = true;
+    options.appendLiveryTailPadding = true;
+    const auto sections = fls::VinylTreeDecoder(options).buildLiverySections(body, QVector<int>{3});
+    QVector<const fls::VinylShape *> shapes;
+    collectShapes(sections.front().subtree, shapes);
+    bool found = false;
+    std::function<void(const fls::VinylGroup &)> inspect = [&](const auto &group) {
+        if (std::abs(group.px - 3.291839599609375) < 1e-6
+            && std::abs(group.py - 88.91642761230469) < 1e-6
+            && std::abs(group.sx - 0.6174174547195435) < 1e-6
+            && std::abs(group.rot - 63.69993591308594) < 1e-6) {
+            found = true;
+        }
+        for (const auto &item : group.items) {
+            if (!item.isShape()) {
+                inspect(*std::get<fls::VinylGroupPtr>(item.value));
+            }
+        }
+    };
+    inspect(sections.front().subtree);
+    if (!found || shapes.size() != 3) {
+        qCritical() << "unmarked legacy transform alignment" << found << shapes.size();
+        return false;
+    }
+    return true;
+}
+
 bool verifyUnmaskedGroup(const QString &path) {
     const fls::VinylGroup group = fls::decodeGroup(
         fls::readCGroupPayload(path), nullptr);
@@ -440,5 +478,5 @@ int main(int argc, char *argv[]) {
     return testGeneration1MarkerlessRoot()
         && testGeneration2MaskFraming() && testGeneration3TrailingMasks()
         && testShapeIdAliases() && testStandaloneTransformTrailer()
-        && testLiveryLockedTransformFrames() ? 0 : 1;
+        && testLiveryLockedTransformFrames() && testUnmarkedLegacyLiveryTransform() ? 0 : 1;
 }

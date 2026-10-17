@@ -59,4 +59,8 @@ VinylGroup buildTree(const QByteArray &layerData, const QByteArray &fullPayload)
 QVector<LiverySection> buildLiverySections(const QByteArray &body, const QVector<int> &sectionCounts);
 QVector<QString> validateTree(const VinylGroup &root);
 
+namespace detail {
+bool isValidVinylShapeBasis(double scaleX, double scaleY, double skew);
+}
+
 } // namespace fls

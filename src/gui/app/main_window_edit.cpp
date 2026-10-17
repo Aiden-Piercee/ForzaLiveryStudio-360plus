@@ -2003,7 +2003,6 @@ void MainWindow::noteProjectStructureChanged() {
     if (state_->project_.isLivery) {
         const QString sectionId = activeLiverySectionId();
         if (!sectionId.isEmpty()) {
-            applyLiverySectionVisibility(sectionId);
             treeModel_->clearSectionCache();
             treeModel_->clear();
             ScopedPerf perfTree("  treeModel_->setProjectSection");

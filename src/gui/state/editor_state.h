@@ -136,6 +136,7 @@ public:
     void setActiveSectionId(const QString &sectionGroupId);
     void setToolName(const QString &name);
     const QVector<SceneRenderEntry> &renderEntries() const;
+    const QVector<SceneRenderEntry> &activeRenderEntries() const;
     QSet<QString> sectionIdsForNodes(const QVector<QString> &nodeIds) const;
 
     QVector<QString> normalizeEntrySelection(const QVector<QString> &entryIds) const;
@@ -257,6 +258,8 @@ private:
     mutable QHash<QString, fls::scene::Layer *> sceneNodeById_;
     mutable bool renderCacheDirty_ = true;
     mutable QVector<SceneRenderEntry> renderEntries_;
+    mutable QVector<SceneRenderEntry> activeRenderEntries_;
+    mutable bool activeRenderCacheDirty_ = true;
     mutable QHash<QString, int> renderEntryByNodeId_;
 };
 

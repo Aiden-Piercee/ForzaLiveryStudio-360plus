@@ -23,6 +23,9 @@ exports grouped `C_group` folders and `C_livery` folders.
   project every minute, including unsaved projects. A clean project replacement or exit
   removes that instance's copy; abandoned copies are offered for recovery at startup.
   Configurable autosave is enabled by default and writes only to an associated `.3so`.
+  Document version 4 stores authored visibility independently of the canvas's
+  active livery section. Loading older documents restores shapes hidden by
+  section isolation when their visibility matches that layout.
 - Drag/drop projects (`.3so`), `C_group`/`C_livery` files/folders, and
   image guide layers from Explorer.
 - Edit layers with Select, Move, Marquee, Transform, Rotate, Pipette, Pen, and Lining
@@ -274,7 +277,7 @@ exports grouped `C_group` folders and `C_livery` folders.
   evaluate world-space shape geometry.
 - Export through one **Export…** action with a dedicated Qt dialog for the
   destination path, folder browsing, game version, and container format. The
-  supported PGS targets are FH2, FH3, FH5, FH6, FM5, FM6, and Forza Motorsport 2023. FH5 WGS output
+  supported PGS targets are FH2, FH3, FH4, FH5, FH6, FM5, FM6, FM7, and Forza Motorsport 2023. FH5 WGS output
   replaces an existing registered asset through a container-descriptor selector,
   with automatic save-profile and container-name fields. The
   dialog remembers its geometry and uses the remembered export destination.
@@ -284,7 +287,7 @@ exports grouped `C_group` folders and `C_livery` folders.
   imported and newly created livery projects while preserving visible section
   group structure, nesting, and masks. With a
   car model loaded, livery export writes the target game's thumbnail from the
-  textured car render. FH2, FH3, FH5, FM5, and FM6 use PNG thumbnails and compressed
+  textured car render. FH2, FH3, FH4, FH5, FM5, FM6, and FM7 use PNG thumbnails and compressed
   `C_group` or `C_livery` payloads. Motorsport 2023 uses GUID asset folders with `data`, `header`,
   and PNG `thumbnail` files; group data is raw and livery data is block-compressed.
   Compatible imported positional paint metadata is retained. Unmatched paint
@@ -423,6 +426,28 @@ The vcpkg installation must include `qtsvg:x64-windows` in addition to the
 existing Qt base and image-format packages.
 Test executables are excluded by default. Configure with
 `-DFLS_BUILD_TESTS=ON` when they are required.
+Project conversion tests save and reload packed documents around game export,
+then compare shape identities, colors, masks, section assignments, and world
+transforms. Local assets under `tests/encoder roundtrip` are registered as an
+additional fixture test when that directory exists at configuration time.
+The export-target test drives the dialog through an offscreen Qt platform.
+Native-reference tests compare decoded geometry across game versions and check
+saved-project exports against authoritative headers and decompressed payloads.
+Header identity and publication metadata are normalized for comparison.
+Cross-game comparisons allow paint colors, selectors, finishes, and unmatched
+entry tables to differ; artwork, counters, record framing, and trailers must match.
+Compatible same-game paint and entry tables must survive unchanged.
+Complex-reference tests exercise every source and destination pairing through
+saved project documents. They compare shape order, geometry, colors, effective
+masks, visibility, and section assignment against the destination's reference.
+Their report records byte equality separately from scene equivalence, since
+group origins and transform frames can have equivalent encodings. Opaque header
+trailers are excluded from the normalized core-header comparison.
+
+```powershell
+ctest --test-dir build -C Release -R "game_export|game_native_references|game_complex_references|game_project_roundtrip|export_target" --output-on-failure
+```
+
 Public builds enable `FLS_PRIVACY_POLICY` by default, which blocks importing
 locked game content. Private development builds can opt out at configure time:
 

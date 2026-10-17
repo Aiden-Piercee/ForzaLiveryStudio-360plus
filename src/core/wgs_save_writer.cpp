@@ -306,7 +306,8 @@ QMap<QString, QByteArray> prepareWrites(const Snapshot &snapshot, const QMap<QSt
             QStringLiteral("Replacement payload must be editable and assigned to the destination profile"));
     const HeaderMetadata oldHeader = parseHeader(snapshot.target.headerBytes);
     const HeaderMetadata header = parseHeader(blobs.value(QStringLiteral("header")));
-    require(header.formatVersion == 4 && header.guid == oldHeader.guid && header.creatorTag == snapshot.target.creatorTag
+    require((header.formatVersion == 4 || header.formatVersion == 6)
+                && header.guid == oldHeader.guid && header.creatorTag == snapshot.target.creatorTag
                 && (!livery || header.carId == static_cast<quint32>(snapshot.target.carId)),
             QStringLiteral("Replacement header must retain the WGS slot identity and profile owner"));
     quint64 size = 0;

@@ -238,7 +238,7 @@ void ProjectCanvas::forEachSceneShape(
     const std::function<bool(const fls::scene::Shape &, const QTransform &, int)> &visit,
     bool reverse) const {
     if (state_ != nullptr) {
-        const QVector<SceneRenderEntry> &entries = state_->renderEntries();
+        const QVector<SceneRenderEntry> &entries = state_->activeRenderEntries();
         const int n = entries.size();
         for (int i = 0; i < n; ++i) {
             const SceneRenderEntry &entry = entries[reverse ? n - 1 - i : i];
@@ -270,7 +270,7 @@ void ProjectCanvas::forEachSceneGuide(
     const std::function<bool(const fls::scene::GuideLayer &, const QTransform &, const QString &)> &visit,
     bool reverse) const {
     if (state_ != nullptr) {
-        const QVector<SceneRenderEntry> &entries = state_->renderEntries();
+        const QVector<SceneRenderEntry> &entries = state_->activeRenderEntries();
         const int n = entries.size();
         for (int i = 0; i < n; ++i) {
             const SceneRenderEntry &entry = entries[reverse ? n - 1 - i : i];

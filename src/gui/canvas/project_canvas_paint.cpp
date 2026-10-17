@@ -1275,7 +1275,7 @@ void ProjectCanvas::paintGL() {
 
     painter.beginNativePainting();
     if (state_ != nullptr) {
-        renderer_.render(state_->renderEntries(), geometry_, deviceCamera, deviceSize,
+        renderer_.render(state_->activeRenderEntries(), geometry_, deviceCamera, deviceSize,
                          flash_.layerIds, selectionFlashHue(), selectionFlashStrength(), false);
     } else {
         renderer_.render(*project_, geometry_, deviceCamera, deviceSize,

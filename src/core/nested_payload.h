@@ -19,6 +19,6 @@ enum class GroupRecordGeneration : quint8 {
 
 QByteArray buildNestedPayload(const Project &project, const SpriteSizeFn &spriteSize = {},
                              GroupRecordGeneration generation = GroupRecordGeneration::Current,
-                             bool centerArtwork = true);
+                             bool centerArtwork = true, bool embeddedLivery = false);
 
 } // namespace fls

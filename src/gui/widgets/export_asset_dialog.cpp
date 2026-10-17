@@ -80,6 +80,10 @@ public:
                               static_cast<int>(ExportGameVersion::Motorsport5));
         gameVersion_->addItem(QStringLiteral("Forza Motorsport 6"),
                               static_cast<int>(ExportGameVersion::Motorsport6));
+        gameVersion_->addItem(QStringLiteral("Forza Motorsport 7"),
+                              static_cast<int>(ExportGameVersion::Motorsport7));
+        gameVersion_->addItem(QStringLiteral("Forza Horizon 4"),
+                              static_cast<int>(ExportGameVersion::Horizon4));
         form->addRow(QStringLiteral("Game version"), gameVersion_);
 
         containerFormat_ = new QComboBox(this);

@@ -103,9 +103,7 @@ bool isFM2023ShapePayloadAt(const QByteArray &data, int idPos, int transformPos,
     const double skew = readLeFloat(data, transformPos + 20);
     return std::isfinite(rotation) && std::abs(rotation) <= 10000.0
         && std::abs(px) < 50000.0 && std::abs(py) < 50000.0
-        && std::abs(sx) > 1e-6 && std::abs(sx) < 200.0
-        && std::abs(sy) > 1e-6 && std::abs(sy) < 5000.0
-        && std::isfinite(skew) && std::abs(skew) < 200.0;
+        && detail::isValidVinylShapeBasis(sx, sy, skew);
 }
 
 bool isFM2023BareShapeAt(const QByteArray &data, int pos) {

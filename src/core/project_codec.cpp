@@ -878,6 +878,58 @@ Project importCLiveryData(const QByteArray &wrapped, const QByteArray &header,
     return importCLiveryDecoded(livery, std::move(project));
 }
 
+namespace {
+
+constexpr int kSectionIsolationProjectVersion = 3;
+
+void collectSectionShapes(scene::Layer &layer, QVector<scene::Shape *> &shapes) {
+    if (layer.kind() == scene::LayerKind::Shape) {
+        shapes.append(static_cast<scene::Shape *>(&layer));
+    } else if (layer.kind() == scene::LayerKind::Group) {
+        for (const auto &child : static_cast<scene::Group &>(layer).children) {
+            collectSectionShapes(*child, shapes);
+        }
+    }
+}
+
+void restoreSectionIsolationVisibility(Project &project) {
+    QVector<scene::Shape *> hiddenShapes;
+    int visibleSections = 0;
+
+    if (!project.isLivery || project.root == nullptr) {
+        return;
+    }
+    for (const auto &child : project.root->children) {
+        if (child->kind() != scene::LayerKind::Group
+            || !static_cast<const scene::Group &>(*child).isLiverySection) {
+            continue;
+        }
+        QVector<scene::Shape *> shapes;
+        collectSectionShapes(*child, shapes);
+        if (shapes.isEmpty()) {
+            continue;
+        }
+        const auto visibleCount = std::count_if(shapes.cbegin(), shapes.cend(), [](const auto *shape) {
+            return shape->visible;
+        });
+        if (visibleCount != 0 && visibleCount != shapes.size()) {
+            return;
+        }
+        if (visibleCount != 0) {
+            ++visibleSections;
+        } else {
+            hiddenShapes.append(shapes);
+        }
+    }
+    if (visibleSections == 1) {
+        for (auto *shape : hiddenShapes) {
+            shape->visible = true;
+        }
+    }
+}
+
+} // namespace
+
 Project projectFromJson(const QJsonObject &object) {
     if (object.contains(QStringLiteral("format"))) {
         const QString format =
@@ -948,6 +1000,9 @@ Project projectFromJson(const QJsonObject &object) {
         }
     };
     scan(*project.root);
+    if (object.value(QStringLiteral("version")).toInt(0) <= kSectionIsolationProjectVersion) {
+        restoreSectionIsolationVisibility(project);
+    }
     const QJsonArray colorSwatches = object.value(QStringLiteral("color_swatches")).toArray();
     project.colorSwatches.reserve(colorSwatches.size());
     for (const QJsonValue &value : colorSwatches) {

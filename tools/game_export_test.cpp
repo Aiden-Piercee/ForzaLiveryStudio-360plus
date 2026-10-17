@@ -185,13 +185,14 @@ void testEditedLivery(const fls::Project &source, const QString &output, fls::Ex
 }
 
 void testLiveries(const QString &root) {
-    const std::array<fls::ExportGameVersion, 7> games = {
+    const std::array<fls::ExportGameVersion, 9> games = {
         fls::ExportGameVersion::Horizon6, fls::ExportGameVersion::Horizon5,
         fls::ExportGameVersion::Motorsport2023, fls::ExportGameVersion::Horizon2,
         fls::ExportGameVersion::Horizon3, fls::ExportGameVersion::Motorsport5,
-        fls::ExportGameVersion::Motorsport6};
-    const std::array<quint32, 7> versions = {7, 4, 9, 0, 1, 0, 0};
-    const std::array<int, 7> envelopes = {51, 50, 66, 49, 50, 45, 49};
+        fls::ExportGameVersion::Motorsport6, fls::ExportGameVersion::Motorsport7,
+        fls::ExportGameVersion::Horizon4};
+    const std::array<quint32, 9> versions = {7, 6, 9, 0, 1, 0, 0, 2, 4};
+    const std::array<int, 9> envelopes = {51, 50, 66, 49, 50, 45, 49, 50, 50};
     for (int gameIndex = 0; gameIndex < static_cast<int>(games.size()); ++gameIndex) {
         const auto game = games[gameIndex];
         const int sections = gameIndex == 0 ? 11 : 6;
@@ -213,6 +214,37 @@ void testLiveries(const QString &root) {
                 auto reexport = imported;
                 const auto rebuilt = fls::encodeGameLiveryPayload(reexport, game);
                 require(paintBlock(raw) == paintBlock(rebuilt), "paint preservation");
+            }
+        }
+    }
+}
+
+void testThinShearedArtwork(const QString &root) {
+    for (const auto game : {fls::ExportGameVersion::Horizon6, fls::ExportGameVersion::Horizon5,
+            fls::ExportGameVersion::Motorsport2023, fls::ExportGameVersion::Horizon2,
+            fls::ExportGameVersion::Horizon3, fls::ExportGameVersion::Motorsport5,
+            fls::ExportGameVersion::Motorsport6, fls::ExportGameVersion::Motorsport7,
+            fls::ExportGameVersion::Horizon4}) {
+        auto project = makeLivery(6);
+        auto &section = static_cast<fls::scene::Group &>(*project.root->children[4]);
+        auto &shape = static_cast<fls::scene::Shape &>(*section.children.front());
+        shape.rotation = 232.0435489560202;
+        shape.scaleX = 0.0032935513482179007;
+        shape.scaleY = 3.357689673452735e-7;
+        shape.skew = 127335.5570428808;
+        const QString folder = QDir(root).filePath(QStringLiteral("thin-shear-%1").arg(static_cast<int>(game)));
+        fls::exportGameLivery(project, folder, game);
+        const auto imported = game == fls::ExportGameVersion::Motorsport2023
+            ? fls::importFM2023Asset(folder) : fls::importCLivery(folder);
+        compareArtwork(project, imported, "thin sheared artwork");
+        QVector<const fls::scene::Shape *> after;
+        collectShapes(*imported.root, after);
+        const auto expected = shape.worldMatrix();
+        const auto actual = after[4]->worldMatrix();
+        for (int row = 0; row < 2; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                require(std::abs(expected.m[row][column] - actual.m[row][column]) < 1e-6,
+                    "thin sheared artwork affine basis");
             }
         }
     }
@@ -274,6 +306,17 @@ void testBoundsAndBlocks(const QString &root) {
     require(paintBlock(fls::encodeGameLiveryPayload(painted, fls::ExportGameVersion::Horizon5))
         == paintBlock(fls::encodeGameLiveryPayload(makeLivery(6), fls::ExportGameVersion::Horizon5)),
         "unmatched paint replaced with native fallback");
+    for (const auto game : {fls::ExportGameVersion::Horizon2, fls::ExportGameVersion::Horizon3,
+            fls::ExportGameVersion::Motorsport5, fls::ExportGameVersion::Motorsport6,
+            fls::ExportGameVersion::Motorsport7}) {
+        auto scaled = makeLivery(6);
+        auto &section = static_cast<fls::scene::Group &>(*scaled.root->children[2]);
+        static_cast<fls::scene::Shape &>(*section.children.front()).scaleX = 150.0;
+        section.append(makeShape(12));
+        const QString scaledFolder = QDir(root).filePath(QStringLiteral("scaled-%1").arg(static_cast<int>(game)));
+        fls::exportGameLivery(scaled, scaledFolder, game);
+        compareArtwork(scaled, fls::importCLivery(scaledFolder), "section scale across siblings");
+    }
     auto large = makeLivery(6);
     auto &top = static_cast<fls::scene::Group &>(*large.root->children[2]);
     for (int index = 1; index < 1500; ++index) {
@@ -433,11 +476,403 @@ void testSamples(const QString &sampleRoot, const QString &outputRoot) {
     qInfo() << "Sample headers:" << headerCount << "export/import:" << exportCount << "locked skipped:" << locked;
 }
 
+fls::Project saveReload(const fls::Project &project, const QString &path) {
+    QFile file(path);
+    require(file.open(QIODevice::WriteOnly), "project save");
+    const auto bytes = fls::encodeProjectDocument(project);
+    require(file.write(bytes) == bytes.size(), "project write");
+    file.close();
+    return fls::decodeProjectDocument(readFile(path));
+}
+
+QByteArray normalizedHeader(const QByteArray &bytes, bool discardTrailing = false) {
+    auto header = fls::parseHeader(bytes);
+    header.name.clear();
+    header.description.clear();
+    header.published = false;
+    header.creatorName.clear();
+    header.creatorTag.fill('\0');
+    header.year = 0;
+    header.month = 0;
+    header.day = 0;
+    header.fieldBlock.replace(0, 12, QByteArray(12, '\0'));
+    header.guid.fill('\0');
+    if (discardTrailing) {
+        header.trailing.clear();
+    }
+    return fls::buildHeader(header);
+}
+
+void equalBytes(const QByteArray &expected, const QByteArray &actual, const QString &label) {
+    if (expected == actual) {
+        return;
+    }
+    int offset = 0;
+    while (offset < std::min(expected.size(), actual.size()) && expected[offset] == actual[offset]) {
+        ++offset;
+    }
+    require(false, QStringLiteral("%1 differs at %2, sizes %3/%4, expected %5 actual %6")
+        .arg(label).arg(offset).arg(expected.size()).arg(actual.size())
+        .arg(QString::fromLatin1(expected.mid(offset, 24).toHex()))
+        .arg(QString::fromLatin1(actual.mid(offset, 24).toHex())));
+}
+
+QByteArray normalizedLivery(QByteArray bytes, bool fallback) {
+    bytes.replace(33, 8, QByteArray(8, '\0'));
+    if (!fallback) {
+        return bytes;
+    }
+    const auto version = fls::detail::readLeU32(bytes, 29);
+    int artwork = bytes.indexOf(QByteArray("gyvl", 4));
+    if (version >= 5 && version <= 7) {
+        const int entryOffset = version == 5 ? 41 : 42;
+        const int count = fls::detail::readLeU32(bytes, entryOffset);
+        require(entryOffset + 8 + count * 7 == artwork, "native entry table bounds");
+        bytes.remove(entryOffset + 4, count * 7);
+        bytes.replace(entryOffset, 4, QByteArray(4, '\0'));
+        artwork = bytes.indexOf(QByteArray("gyvl", 4));
+    }
+    const int stats = artwork + fls::detail::readLeU32(bytes, artwork - 4);
+    const int paint = stats + (version == 2 ? 28 : 36);
+    const int end = version == 2 ? bytes.size() : bytes.indexOf(QByteArray("yrvl", 4), paint);
+    require(end > paint && (end - paint - 3) % 40 == 0, "native paint bounds");
+    for (int offset = paint + 1; offset < end - 2; offset += 40) {
+        require(bytes.mid(offset, 2) == QByteArray("\x01\x01", 2), "native paint framing");
+        bytes.replace(offset + 2, 10, QByteArray(10, '\0'));
+        bytes.replace(offset + 27, 8, QByteArray(8, '\0'));
+    }
+    return bytes;
+}
+
+void testNativeReferences(const QString &referenceRoot, const QString &outputRoot) {
+    using Game = fls::ExportGameVersion;
+    const std::array<std::pair<QString, Game>, 7> games = {{
+        {"1)FM5", Game::Motorsport5}, {"2)FH2", Game::Horizon2},
+        {"3)FM6", Game::Motorsport6}, {"4)FH3", Game::Horizon3},
+        {"5)FM7", Game::Motorsport7}, {"6)FH4", Game::Horizon4},
+        {"7)FH5", Game::Horizon5}}};
+    const std::array<quint32, 7> versions = {0, 0, 0, 1, 2, 4, 6};
+    std::array<std::array<fls::Project, 2>, 7> projects;
+    std::array<std::array<QByteArray, 2>, 7> payloads;
+    std::array<std::array<QByteArray, 2>, 7> headers;
+    for (int index = 0; index < games.size(); ++index) {
+        std::array<bool, 2> found{};
+        const auto &[name, game] = games[index];
+        for (const auto &folder : QDir(QDir(referenceRoot).filePath(name)).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            const QString path = folder.absoluteFilePath();
+            const bool livery = QFile::exists(QDir(path).filePath("C_livery"));
+            const int kind = livery ? 1 : 0;
+            require(!found[kind], name + " duplicate reference");
+            found[kind] = true;
+            const QString label = name + (livery ? " livery" : " group");
+            const auto headerBytes = readFile(QDir(path).filePath("header"));
+            const auto header = fls::parseHeader(headerBytes);
+            equalBytes(headerBytes, fls::buildHeader(header), label + " header read/write");
+            require(header.formatVersion == versions[index] && header.typeValue == (livery ? 5 : 2)
+                && header.hasCarId == livery && header.carId == (livery ? 1668 : 0), label + " metadata");
+            auto imported = livery ? fls::importCLivery(path) : fls::importCGroupNested(path);
+            require(shapeCount(*imported.root) == (livery ? 5 : 2), label + " complete import");
+            QVector<const fls::scene::Shape *> shapes;
+            collectShapes(*imported.root, shapes);
+            for (const auto *shape : shapes) {
+                require(shape->shapeId == 101 && !shape->raster && !shape->mask
+                    && shape->color == std::array<quint8, 4>{255, 255, 255, 255}, label + " reference shapes");
+            }
+            const auto raw = fls::inflateContainer(readFile(QDir(path).filePath(livery ? "C_livery" : "C_group")));
+            if (livery) {
+                const auto payload = fls::parseInflatedLiveryPayload(raw);
+                require(payload.sectionCounts == QVector<int>({1, 1, 1, 1, 1, 0}), label + " declared sections");
+                const auto sections = fls::decodeLiverySections(payload);
+                require(sections.size() >= 6, label + " decoded sections");
+                for (const auto &section : sections) {
+                    const int expected = section.slot < 5 ? 1 : 0;
+                    require(skippedShapes(section.subtree) == 0
+                        && (expected == 0 || fls::validateTree(section.subtree).isEmpty()), label + " tree validity");
+                    require(fls::flattenGroup(section.subtree).size() == expected, label + " section shapes");
+                }
+            } else {
+                require(fls::validateTree(fls::VinylTreeDecoder{}.decodeGroup(raw)).isEmpty(), label + " tree validity");
+            }
+            projects[index][kind] = saveReload(imported, QDir(outputRoot).filePath(label + ".3so"));
+            compareArtwork(imported, projects[index][kind], label + " saved project");
+            headers[index][kind] = headerBytes;
+            payloads[index][kind] = raw;
+            qInfo().noquote() << "Read native reference:" << label;
+        }
+        require(found[0] && found[1], name + " missing reference");
+    }
+    for (int index = 0; index < games.size(); ++index) {
+        const auto &[name, game] = games[index];
+        for (int kind = 0; kind < 2; ++kind) {
+            const bool livery = kind == 1;
+            const QString label = name + (livery ? " livery" : " group");
+            compareArtwork(projects.back()[kind], projects[index][kind], label + " consistency");
+            for (const bool sameTitle : {true, false}) {
+                const auto &source = sameTitle ? projects[index][kind] : projects.back()[kind];
+                const QString output = QDir(outputRoot).filePath(label + (sameTitle ? " same-title" : " from-FH5"));
+                if (livery) {
+                    fls::exportGameLivery(source, output, game);
+                } else {
+                    fls::exportGameGroup(source, output, game);
+                }
+                const auto actual = fls::inflateContainer(readFile(QDir(output).filePath(livery ? "C_livery" : "C_group")));
+                equalBytes(normalizedHeader(headers[index][kind]), normalizedHeader(readFile(QDir(output).filePath("header"))), label + " native header framing");
+                equalBytes(livery ? normalizedLivery(payloads[index][kind], !sameTitle) : payloads[index][kind],
+                    livery ? normalizedLivery(actual, !sameTitle) : actual, label + (sameTitle ? " same-title bytes" : " converted bytes"));
+                const auto reimported = livery ? fls::importCLivery(output) : fls::importCGroupNested(output);
+                compareArtwork(source, reimported, label + " second import");
+                saveReload(reimported, output + ".3so");
+                qInfo().noquote() << "Matched native encoding:" << output;
+            }
+        }
+    }
+}
+
+int shapeSection(const fls::scene::Shape &shape) {
+    for (auto *parent = shape.parent(); parent != nullptr; parent = parent->parent()) {
+        if (parent->kind() == fls::scene::LayerKind::Group) {
+            const auto &group = static_cast<const fls::scene::Group &>(*parent);
+            if (group.isLiverySection) {
+                return group.liverySectionSlot;
+            }
+        }
+    }
+    return -1;
+}
+
+bool effectiveMask(const fls::scene::Shape &shape) {
+    if (shape.mask) {
+        return true;
+    }
+    for (auto *parent = shape.parent(); parent != nullptr; parent = parent->parent()) {
+        if (parent->kind() == fls::scene::LayerKind::Group
+            && (static_cast<const fls::scene::Group &>(*parent).flags & 64) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void compareComplexArtwork(const fls::Project &expected, const fls::Project &actual,
+                           const QString &label) {
+    compareArtwork(expected, actual, label, !expected.isLivery);
+    QVector<const fls::scene::Shape *> before;
+    QVector<const fls::scene::Shape *> after;
+    collectShapes(*expected.root, before);
+    collectShapes(*actual.root, after);
+    for (int index = 0; index < before.size(); ++index) {
+        require(shapeSection(*before[index]) == shapeSection(*after[index]), label + " section assignment");
+        require(before[index]->visible == after[index]->visible, label + " visibility");
+        require(effectiveMask(*before[index]) == effectiveMask(*after[index]),
+            QStringLiteral("%1 shape %2 mask").arg(label).arg(index));
+    }
+}
+
+void testHorizonLiveryGroupBoundaries(const QString &root) {
+    for (const auto game : {fls::ExportGameVersion::Horizon6, fls::ExportGameVersion::Horizon4,
+            fls::ExportGameVersion::Horizon5}) {
+        for (int depth = 1; depth <= 3; ++depth) {
+            auto project = makeLivery(6);
+            auto &section = static_cast<fls::scene::Group &>(*project.root->children[1]);
+            section.children.clear();
+            auto nested = std::make_unique<fls::scene::Group>();
+            nested->append(makeShape(0));
+            nested->append(makeShape(1));
+            for (int level = 1; level < depth; ++level) {
+                auto parent = std::make_unique<fls::scene::Group>();
+                parent->append(makeShape(0));
+                parent->append(std::move(nested));
+                nested = std::move(parent);
+            }
+            auto outer = std::make_unique<fls::scene::Group>();
+            outer->append(std::move(nested));
+            outer->append(makeShape(2));
+            section.append(std::move(outer));
+            section.append(makeShape(3));
+            const QString label = QStringLiteral("group-boundaries-%1-%2").arg(static_cast<int>(game)).arg(depth);
+            const QString folder = QDir(root).filePath(label);
+            qInfo().noquote() << "Checking" << label;
+            saveReload(project, folder + ".source.3so");
+            fls::exportGameLivery(project, folder, game);
+            const auto imported = fls::importCLivery(folder);
+            compareComplexArtwork(project, saveReload(imported, folder + ".3so"), label);
+            const auto sections = fls::decodeLiverySections(fls::readLiveryPayload(folder));
+            const auto shapes = fls::flattenGroup(sections[1].subtree);
+            require(shapes.size() == depth + 3, label + " Back artwork count");
+            for (int index = shapes.size() - 3; index + 1 < shapes.size(); ++index) {
+                const int terminalEnd = shapes[index].absPos + shapes[index].marker.size() + 30;
+                require(shapes[index + 1].absPos == terminalEnd,
+                    label + " shape following a completed group must start at the terminal payload end");
+            }
+        }
+    }
+}
+
+void testComplexReferences(const QString &referenceRoot, const QString &outputRoot) {
+    using Game = fls::ExportGameVersion;
+    const std::array<std::pair<QString, Game>, 7> games = {{
+        {"1)FM5", Game::Motorsport5}, {"2)FH2", Game::Horizon2},
+        {"3)FM6", Game::Motorsport6}, {"4)FH3", Game::Horizon3},
+        {"5)FM7", Game::Motorsport7}, {"6)FH4", Game::Horizon4},
+        {"7)FH5", Game::Horizon5}}};
+    const QVector<int> sectionCounts{1, 751, 2606, 2772, 2772, 0};
+    std::array<std::array<fls::Project, 2>, 7> projects;
+    std::array<std::array<QByteArray, 2>, 7> payloads;
+    std::array<std::array<QByteArray, 2>, 7> headers;
+    QJsonArray results;
+    QStringList failures;
+    for (int index = 0; index < games.size(); ++index) {
+        const auto &[name, game] = games[index];
+        std::array<bool, 2> found{};
+        for (const auto &folder : QDir(QDir(referenceRoot).filePath(name)).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            const QString path = folder.absoluteFilePath();
+            const bool livery = QFile::exists(QDir(path).filePath("C_livery"));
+            const int kind = livery ? 1 : 0;
+            require(!found[kind], name + " duplicate complex reference");
+            found[kind] = true;
+            const QString label = name + (livery ? " livery" : " group");
+            const QByteArray raw = fls::inflateContainer(readFile(QDir(path).filePath(livery ? "C_livery" : "C_group")));
+            const QByteArray headerBytes = readFile(QDir(path).filePath("header"));
+            const auto header = fls::parseHeader(headerBytes);
+            equalBytes(headerBytes, fls::buildHeader(header), label + " header round trip");
+            require(header.typeValue == (livery ? 8902 : 1806)
+                && header.carId == (livery ? 1668 : 0), label + " header count and car");
+            if (livery) {
+                const auto payload = fls::parseInflatedLiveryPayload(raw);
+                require(payload.sectionCounts == sectionCounts, label + " declared sections");
+                for (const auto &section : fls::decodeLiverySections(payload)) {
+                    const int count = section.slot < sectionCounts.size() ? sectionCounts[section.slot] : 0;
+                    require(skippedShapes(section.subtree) == 0
+                        && fls::flattenGroup(section.subtree).size() == count
+                        && (count == 0 || fls::validateTree(section.subtree).isEmpty()), label + " complete section tree");
+                }
+            } else {
+                require(fls::validateTree(fls::VinylTreeDecoder{}.decodeGroup(raw)).isEmpty(), label + " complete group tree");
+            }
+            const auto imported = livery ? fls::importCLivery(path) : fls::importCGroupNested(path);
+            require(shapeCount(*imported.root) == header.typeValue, label + " imported shapes");
+            projects[index][kind] = saveReload(imported, QDir(outputRoot).filePath(label + ".3so"));
+            compareComplexArtwork(imported, projects[index][kind], label + " saved project");
+            payloads[index][kind] = raw;
+            headers[index][kind] = headerBytes;
+            qInfo().noquote() << "Read complex reference:" << label;
+        }
+        require(found[0] && found[1], name + " missing complex reference");
+    }
+    for (int target = 0; target < games.size(); ++target) {
+        for (int kind = 0; kind < 2; ++kind) {
+            const bool livery = kind == 1;
+            const auto &[name, game] = games[target];
+            const QString label = name + (livery ? " livery" : " group");
+            compareComplexArtwork(projects.back()[kind], projects[target][kind], label + " reference consistency");
+            for (int source = 0; source < games.size(); ++source) {
+                const QString stage = games[source].first + " -> " + label;
+                QJsonObject result{{"source", games[source].first}, {"target", name}, {"kind", livery ? "livery" : "group"}};
+                try {
+                    const QString output = QDir(outputRoot).filePath(label + " from-" + games[source].first);
+                    const auto &project = projects[source][kind];
+                    if (livery) {
+                        fls::exportGameLivery(project, output, game);
+                    } else {
+                        fls::exportGameGroup(project, output, game);
+                    }
+                    const QByteArray raw = fls::inflateContainer(readFile(QDir(output).filePath(livery ? "C_livery" : "C_group")));
+                    const auto imported = livery ? fls::importCLivery(output) : fls::importCGroupNested(output);
+                    compareComplexArtwork(project, imported, stage + " second import");
+                    compareComplexArtwork(projects[target][kind], imported, stage + " target artwork");
+                    compareComplexArtwork(imported, saveReload(imported, output + ".3so"), stage + " second project");
+                    equalBytes(normalizedHeader(headers[target][kind], true),
+                        normalizedHeader(readFile(QDir(output).filePath("header")), true), stage + " header layout");
+                    if (livery) {
+                        require(fls::parseInflatedLiveryPayload(raw).sectionCounts == sectionCounts, stage + " exported sections");
+                        if (source == target) {
+                            equalBytes(paintBlock(payloads[source][kind]), paintBlock(raw), stage + " paint preservation");
+                        }
+                    }
+                    result.insert("passed", true);
+                    result.insert("native_payload_bytes_exact", raw == payloads[target][kind]);
+                    if (livery) {
+                        const auto expected = fls::parseInflatedLiveryPayload(payloads[target][kind]);
+                        const auto actual = fls::parseInflatedLiveryPayload(raw);
+                        result.insert("native_artwork_bytes_exact", expected.body == actual.body);
+                        result.insert("native_artwork_size_matches", expected.body.size() == actual.body.size());
+                        if (target < 5) {
+                            require(expected.body.size() == actual.body.size(), stage + " native legacy artwork framing size");
+                        }
+                    } else {
+                        require(raw.size() == payloads[target][kind].size(), stage + " native group framing size");
+                    }
+                    result.insert("expected_payload_bytes", payloads[target][kind].size());
+                    result.insert("actual_payload_bytes", raw.size());
+                    qInfo().noquote() << "Complex conversion passed:" << stage;
+                } catch (const std::exception &error) {
+                    const QString message = QString::fromUtf8(error.what());
+                    result.insert("passed", false);
+                    result.insert("error", message);
+                    failures.append(stage + ": " + message);
+                    qWarning().noquote() << "Complex conversion failed:" << stage << message;
+                }
+                results.append(result);
+            }
+        }
+    }
+    QFile report(QDir(outputRoot).filePath("report.json"));
+    require(report.open(QIODevice::WriteOnly), "complex report");
+    report.write(QJsonDocument(QJsonObject{{"conversions", results}}).toJson());
+    require(failures.isEmpty(), failures.join('\n'));
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
     try {
+        if (app.arguments().size() == 4 && app.arguments()[1] == "--fh5-framing-reference") {
+            const auto project = fls::decodeProjectDocument(readFile(app.arguments()[2]));
+            const QString reference = app.arguments()[3];
+            const QStringList payloads = QDir(reference).entryList(
+                {QStringLiteral("C_livery"), QStringLiteral("*.c_livery")}, QDir::Files);
+            require(payloads.size() == 1, "framing reference must contain one livery payload");
+            const auto expected = fls::readLiveryPayload(QDir(reference).filePath(payloads.front()));
+            QTemporaryDir output;
+            require(output.isValid(), "framing reference output directory");
+            const auto reloaded = saveReload(project, QDir(output.path()).filePath("source.3so"));
+            fls::exportGameLivery(reloaded, output.path(), fls::ExportGameVersion::Horizon5);
+            const auto actual = fls::readLiveryPayload(output.path());
+            equalBytes(expected.body, actual.body, "FH5 in-game validated artwork framing");
+            require(expected.sectionCounts == actual.sectionCounts, "FH5 framing reference section counters");
+            compareComplexArtwork(project, fls::importCLivery(output.path()), "FH5 framing reference artwork");
+            qInfo() << "FH5 framing reference passed";
+            return 0;
+        }
+        if (app.arguments().size() == 4 && (app.arguments()[1] == "--export-fh5"
+                || app.arguments()[1] == "--compare-livery")) {
+            const auto project = fls::decodeProjectDocument(readFile(app.arguments()[2]));
+            const QString output = app.arguments()[3];
+            if (app.arguments()[1] == "--export-fh5") {
+                fls::exportGameLivery(project, output, fls::ExportGameVersion::Horizon5);
+            }
+            const auto imported = fls::importCLivery(output);
+            compareComplexArtwork(project, imported, "diagnostic livery");
+            compareComplexArtwork(project, saveReload(imported, output + ".imported.3so"),
+                "diagnostic saved project");
+            qInfo() << "Diagnostic livery artwork comparison passed";
+            return 0;
+        }
+        if (app.arguments().size() >= 3 && app.arguments()[1] == "--complex-references") {
+            QTemporaryDir temporary;
+            const QString output = app.arguments().size() == 4 ? app.arguments()[3] : temporary.path();
+            require(QDir().mkpath(output), "complex output directory");
+            testComplexReferences(app.arguments()[2], output);
+            return 0;
+        }
+        if (app.arguments().size() >= 3 && app.arguments()[1] == "--references") {
+            QTemporaryDir temporary;
+            const QString output = app.arguments().size() == 4 ? app.arguments()[3] : temporary.path();
+            require(QDir().mkpath(output), "reference output directory");
+            testNativeReferences(app.arguments()[2], output);
+            return 0;
+        }
         if (app.arguments().size() == 3 && app.arguments()[1] == "--inspect") {
             const auto payload = fls::readLiveryPayload(app.arguments()[2]);
             qInfo() << "Artwork body bytes" << payload.body.size();
@@ -470,6 +905,10 @@ int main(int argc, char *argv[]) {
         }
         qInfo() << "Testing generated liveries";
         testLiveries(temporary.path());
+        qInfo() << "Testing thin sheared artwork";
+        testThinShearedArtwork(temporary.path());
+        qInfo() << "Testing Horizon livery group boundaries";
+        testHorizonLiveryGroupBoundaries(temporary.path());
         qInfo() << "Testing generated groups";
         testGroups(temporary.path());
         qInfo() << "Testing sparse sections, bounds, and blocks";

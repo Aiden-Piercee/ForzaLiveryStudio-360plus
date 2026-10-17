@@ -123,25 +123,29 @@ HeaderMetadata parseHeader(const QByteArray &bytes) {
     }
     offset += PaddingBeforeSec3;
     const bool legacyHeader = meta.formatVersion == 4 || meta.formatVersion == 6;
+    const bool intermediateHeader = meta.formatVersion == 2;
     const bool motorsportHeader = meta.formatVersion == 9;
-    const int sectionPaddingSize = legacyHeader && meta.sectionPrefix != QByteArray(PaddingBeforeSec3, '\0') ? 3 : 7;
-    if (offset + 2 + sectionPaddingSize > bytes.size()
+    const int markerSize = intermediateHeader ? 1 : 2;
+    const int sectionPaddingSize = intermediateHeader ? 0 : legacyHeader ? 3 : 7;
+    if (offset + markerSize + sectionPaddingSize > bytes.size()
         || static_cast<quint8>(bytes.at(offset)) != 1
-        || ((motorsportHeader || legacyHeader)
+        || (!intermediateHeader && ((motorsportHeader || legacyHeader)
                 ? static_cast<quint8>(bytes.at(offset + 1)) > 2
-                : static_cast<quint8>(bytes.at(offset + 1)) != 2)) {
+                : static_cast<quint8>(bytes.at(offset + 1)) != 2))) {
         throw std::runtime_error("header sec3 marker not found at expected offset");
     }
-    meta.sectionMarker = bytes.mid(offset, 2);
-    meta.sectionPadding = bytes.mid(offset + 2, sectionPaddingSize);
-    offset += 2 + sectionPaddingSize;
+    meta.sectionMarker = bytes.mid(offset, markerSize);
+    meta.sectionPadding = bytes.mid(offset + markerSize, sectionPaddingSize);
+    offset += markerSize + sectionPaddingSize;
     if (motorsportHeader) {
         meta.category = detail::readLeU32(bytes, offset);
         offset += 4;
     }
     meta.typeValue = detail::readLeU32(bytes, offset);
     offset += 4;
-    meta.hasCarId = !legacyHeader || bytes.size() - offset >= GuidSize + 4;
+    meta.hasCarId = intermediateHeader || legacyHeader
+        ? detail::readLeU32(meta.fieldBlock, 12) == kLiveryAssetType
+        : true;
     if (meta.hasCarId) {
         meta.carId = detail::readLeU32(bytes, offset);
         offset += 4;
@@ -246,10 +250,11 @@ QByteArray buildHeader(const HeaderMetadata &meta) {
     sectionPrefix.append(QByteArray(PaddingBeforeSec3 - sectionPrefix.size(), '\0'));
     out.append(sectionPrefix);
     out.append(meta.sectionMarker.isEmpty()
-        ? (meta.formatVersion == 4 ? QByteArray("\x01\x01", 2) : QByteArray("\x01\x02", 2))
+        ? (meta.formatVersion == 2 ? QByteArray(1, '\x01') : QByteArray("\x01\x02", 2))
         : meta.sectionMarker);
     const int sectionPaddingSize = meta.sectionPadding.isEmpty()
-        ? (meta.formatVersion == 4 ? 3 : 7) : static_cast<int>(meta.sectionPadding.size());
+        ? (meta.formatVersion == 2 ? 0 : meta.formatVersion == 4 || meta.formatVersion == 6 ? 3 : 7)
+        : static_cast<int>(meta.sectionPadding.size());
     QByteArray sectionPadding = meta.sectionPadding.left(sectionPaddingSize);
     sectionPadding.append(QByteArray(sectionPaddingSize - sectionPadding.size(), '\0'));
     out.append(sectionPadding);
