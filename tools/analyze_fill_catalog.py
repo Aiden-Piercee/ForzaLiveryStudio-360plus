@@ -202,7 +202,7 @@ def main():
     with gzip.open(asset, 'rt', encoding='utf-8') as handle:
         shapes = json.load(handle)['shapes']
     names = json.loads((root / 'assets/vector/shape_names.json').read_text(encoding='utf-8'))
-    existing = set(json.loads((root / 'assets/differential_shapes.json').read_text())['shape_ids'])
+    existing = set(json.loads((root / 'assets/compact_fit_shapes.json').read_text())['shape_ids'])
     native = {}
     if args.union_report:
         native = {record['id']: record for record in json.loads(args.union_report.read_text())['records']}

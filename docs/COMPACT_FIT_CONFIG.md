@@ -88,7 +88,7 @@ These identify the configuration snapshot used for a fit.
 
 ## Thin regions and Lining
 
-**Compact Fit — Thin Regions** and the Lining tool read
+The Lining tool and the headless thin-region API read
 `assets/lining_shapes.json` beside the executable on each operation. The same
 schema and validation rules apply. Edit `build/Release/assets/lining_shapes.json`
 to try changes without rebuilding or restarting. A build redeploys the
@@ -126,7 +126,7 @@ stroke that follows the centerline within its curve allowance. Sampled profile
 deviation is bounded by 8% of local width; endpoint tangent error is limited to
 five degrees. Ribbon coverage is measured separately. Open paths use the shape
 and profile trial and time budgets; the area coverage and growth settings below apply
-to closed Thin Regions.
+to the closed-region API.
 
 The closed-region backend first tries one Square for a straight span and the
 `whole_region` shapes for a complete region. If one placement cannot cover the
@@ -137,7 +137,7 @@ and spans; the backend does not construct a triangle mesh. Whole-region matching
 affine hull anchors as well as bounding boxes, so rotation and heavy skew do
 not require a preferred shape ID.
 
-The overlap envelope follows local stroke width. The GUI quality preset limits
+The overlap envelope follows local stroke width. The quality preset limits
 thickness to 2 times the original, with the supplied outward margin as an additional
 absolute cap. The API permits thickness ratios above 1 and at most 2. Tapered
 tips receive a small geometric tolerance. Closed regions estimate width from

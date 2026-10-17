@@ -24,8 +24,18 @@ int main(int argc, char **argv) {
         settings.setValue(QStringLiteral("ui/behavior/contourFillMode"), QStringLiteral("catalog"));
         settings.sync();
         require(gui::loadBehaviorSettings().contourFillMode == gui::ContourFillMode::CompactFit);
-        for (auto mode : {gui::ContourFillMode::Analytic, gui::ContourFillMode::Differential,
-                         gui::ContourFillMode::ThinRegions, gui::ContourFillMode::CompactFit}) {
+        settings.setValue(QStringLiteral("ui/behavior/contourFillMode"), QStringLiteral("thin"));
+        settings.sync();
+        require(gui::loadBehaviorSettings().contourFillMode == gui::ContourFillMode::CompactFit);
+        settings.setValue(QStringLiteral("ui/behavior/contourFillMode"), QStringLiteral("differential"));
+        settings.sync();
+        require(gui::loadBehaviorSettings().contourFillMode == gui::ContourFillMode::Analytic);
+        settings.remove(QStringLiteral("ui/behavior/contourFillMode"));
+        settings.setValue(QStringLiteral("ui/behavior/differentialContourFill"), true);
+        settings.setValue(QStringLiteral("ui/behavior/differentiablePenFill"), true);
+        settings.sync();
+        require(gui::loadBehaviorSettings().contourFillMode == gui::ContourFillMode::Analytic);
+        for (auto mode : {gui::ContourFillMode::Analytic, gui::ContourFillMode::CompactFit}) {
             auto behavior = gui::loadBehaviorSettings();
             behavior.contourFillMode = mode;
             gui::saveBehaviorSettings(behavior);
@@ -33,6 +43,8 @@ int main(int argc, char **argv) {
         }
         settings.sync();
         require(settings.value(QStringLiteral("ui/behavior/contourFillMode")).toString() == QStringLiteral("compact"));
+        require(!settings.contains(QStringLiteral("ui/behavior/differentialContourFill")));
+        require(!settings.contains(QStringLiteral("ui/behavior/differentiablePenFill")));
     } catch (const std::exception &error) {
         QTextStream(stderr) << error.what() << '\n';
         return 1;

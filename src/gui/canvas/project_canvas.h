@@ -4,7 +4,6 @@
 #include "compact_fit_catalog.h"
 #include "svg_vector_objects.h"
 #include "car_unwrap_overlay.h"
-#include "differential_cover.h"
 #include "canvas_camera.h"
 #include "core_types.h"
 #include "layer.h"
@@ -92,7 +91,6 @@ public:
     QVector<PenPrimitive> penPrimitiveCatalog() const;
     QVector<catalog::Primitive> compactFillPrimitives(QString *error = nullptr) const;
     QVector<catalog::Primitive> thinFillPrimitives(QString *error = nullptr) const;
-    QVector<cover::ShapeMesh> differentialCoverCatalog(QString *error = nullptr) const;
     bool canAssignContourLeeway() const;
     void setContourLeewayGroupId(const QString &groupId);
     QString contourLeewayGroupId() const;

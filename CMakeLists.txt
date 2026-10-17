@@ -241,7 +241,6 @@ qt_add_executable(${FORZA_LIVERY_STUDIO_TARGET} WIN32
     src/gui/fill/bucket_fill.h
     src/gui/fill/svg_vector_objects.cpp
     src/gui/fill/svg_vector_objects.h
-    src/gui/fill/differential_cover.cpp
     src/gui/fill/compact_fit.cpp
     src/gui/fill/compact_fit_reduction.cpp
     src/gui/fill/profile_fit.cpp
@@ -255,15 +254,6 @@ qt_add_executable(${FORZA_LIVERY_STUDIO_TARGET} WIN32
     src/gui/fill/compact_fit_catalog.cpp
     src/gui/fill/compact_fit_geometry.cpp
     src/gui/fill/compact_fit_catalog_internal.h
-    src/gui/fill/differential_cover.h
-    src/gui/fill/differential_cover_candidates.cpp
-    src/gui/fill/differential_cover_geometry.cpp
-    src/gui/fill/differential_cover_gpu.cpp
-    src/gui/fill/differential_cover_gpu.h
-    src/gui/fill/differential_cover_internal.h
-    src/gui/fill/differential_cover_metrics.cpp
-    src/gui/fill/differential_cover_postprocess.cpp
-    src/gui/fill/differential_cover_strategies.cpp
     src/gui/fill/fill_contour.h
     src/gui/canvas/drag_cursors.cpp
     src/gui/canvas/drag_cursors.h
@@ -338,9 +328,6 @@ qt_add_executable(${FORZA_LIVERY_STUDIO_TARGET} WIN32
 if(FLS_CUDA_AVAILABLE)
     target_sources(${FORZA_LIVERY_STUDIO_TARGET} PRIVATE
         src/gui/fill/compact_fit_gpu_rank.cu
-        src/gui/fill/differential_cover_cuda.cpp
-        src/gui/fill/differential_cover_cuda.cu
-        src/gui/fill/differential_cover_cuda_kernel.h
     )
     target_compile_definitions(
         ${FORZA_LIVERY_STUDIO_TARGET} PRIVATE FLS_HAS_CUDA=1)
@@ -671,69 +658,6 @@ if(FLS_BUILD_TESTS)
     target_link_libraries(fls_cubic_contour_tests PRIVATE Qt6::Core Qt6::Gui ZLIB::ZLIB)
     add_test(NAME cubic_contour COMMAND fls_cubic_contour_tests)
 
-    add_executable(fls_differential_cover_tests
-        tools/differential_cover_test.cpp
-        src/gui/fill/differential_cover.cpp
-        src/gui/fill/differential_cover_candidates.cpp
-        src/gui/fill/differential_cover_geometry.cpp
-        src/gui/fill/differential_cover_gpu.cpp
-        src/gui/fill/differential_cover_metrics.cpp
-        src/gui/fill/differential_cover_postprocess.cpp
-        src/gui/fill/differential_cover_strategies.cpp
-        src/gui/fill/cubic_contour.cpp
-        src/gui/fill/pen_fill.cpp
-        src/gui/fill/polygon_mesh.cpp
-        src/gui/widgets/shape_geometry_store.cpp
-    )
-    target_include_directories(fls_differential_cover_tests PRIVATE
-        src/gui/canvas
-        src/gui/fill
-        src/gui/widgets
-    )
-    target_compile_definitions(
-        fls_differential_cover_tests
-        PRIVATE FLS_DIFFERENTIAL_COVER_TESTS=1)
-    target_link_libraries(fls_differential_cover_tests PRIVATE
-        clipper2
-        Qt6::Core
-        Qt6::Gui
-        ZLIB::ZLIB
-    )
-    if(FLS_CUDA_AVAILABLE)
-        target_sources(fls_differential_cover_tests PRIVATE
-            src/gui/fill/differential_cover_cuda.cpp
-            src/gui/fill/differential_cover_cuda.cu
-            src/gui/fill/differential_cover_cuda_kernel.h
-        )
-        target_compile_definitions(
-            fls_differential_cover_tests PRIVATE FLS_HAS_CUDA=1)
-        target_compile_options(fls_differential_cover_tests PRIVATE
-            $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
-            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/Zc:__cplusplus>
-            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>
-        )
-        target_link_libraries(
-            fls_differential_cover_tests PRIVATE CUDA::cudart)
-        set_target_properties(fls_differential_cover_tests PROPERTIES
-            CUDA_ARCHITECTURES all-major
-            CUDA_RUNTIME_LIBRARY Shared
-        )
-        if(WIN32)
-            add_custom_command(
-                TARGET fls_differential_cover_tests POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${FLS_CUDART_DLL}"
-                    "$<TARGET_FILE_DIR:fls_differential_cover_tests>"
-            )
-        endif()
-    endif()
-    if(WIN32)
-        target_link_libraries(fls_differential_cover_tests PRIVATE
-            d3d11
-            d3dcompiler
-        )
-    endif()
-    add_test(NAME differential_cover COMMAND fls_differential_cover_tests)
 else()
     add_custom_target(fls_remove_disabled_tests ALL
         COMMAND "${CMAKE_COMMAND}" -E rm -f
@@ -746,7 +670,6 @@ else()
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_guide_preprocess_metadata_tests${CMAKE_EXECUTABLE_SUFFIX}"
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_image_preprocessor_tests${CMAKE_EXECUTABLE_SUFFIX}"
             "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_region_pen_conversion_tests${CMAKE_EXECUTABLE_SUFFIX}"
-            "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/fls_differential_cover_tests${CMAKE_EXECUTABLE_SUFFIX}"
         COMMENT "Removing disabled tests from release output"
     )
 endif()
@@ -819,7 +742,6 @@ set(FLS_GUI_ASSETS
 )
 
 set(FLS_GUI_ASSET_FILES
-    differential_shapes.json
     compact_fit_shapes.json
     compact_fit_shapes_combined.json
     lining_shapes.json

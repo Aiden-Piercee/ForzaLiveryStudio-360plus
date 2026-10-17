@@ -45,35 +45,9 @@ exports grouped `C_group` folders and `C_livery` folders.
   The polygonal core uses deterministic ear clipping and compatible Square merging.
   Placements are emitted from the boundary inward under a `2 * point count` shape
   cap, and the result is an ordinary single-colour scene group.
-  **Options → Contour Fill** selects **Analytic**, **Differential**,
-  or **Compact Fit** and preserves the selected mode between launches. Analytic
-  is the default. The Differential mode replaces that commit
-  path with a slow analytic greedy cover for the active contour. It optimizes
-  affine catalog shapes against an exact world-coordinate residual, stays within
-  the contour tolerance, and inserts a measured partial result when progress
-  stalls. A deterministic structural pass recognizes boundaries dominated by
-  two affine axes, constructs a minimum rectangle cover on an oblique grid, and
-  legalizes it against the original contour. Compact covers complete directly;
-  thin boundary residuals are retained without adding low-value placements, and
-  other partial covers seed residual fitting. Multi-axis hard boundaries also
-  evaluate their complete square-and-triangle mesh as one coherent compact plan.
-  A rejected plan is discarded. Consecutive hard corners instead seed bounded
-  Square and Triangle Adam jobs whose shared contour vertex remains fixed during
-  optimization. Outward quadratic runs between hard endpoints seed Circle jobs
-  from their arc-length midpoint and tangent, with that midpoint fixed during
-  optimization. A bounded continuity-aware pruning stage aligns exposed
-  boundaries near smooth contour sections, then removes placements under the
-  stabilized contour baseline. A removal can align its newly exposed neighbors
-  through the same bounded proposals. Exact union checks reject added outward
-  deviation, unstable contours, or lost hard-corner features. Smooth-junction
-  ownership can be discarded when the stabilized union remains within the
-  coverage and continuity limits.
-  An optional double-precision CUDA path evaluates the optimizer and
-  legalization first. Direct3D 11 legalization with double-precision CPU Adam is
-  the next backend, followed by the parallel CPU evaluator. Exact CPU candidate
-  verification remains authoritative, and backend failure advances automatically.
-  Its status-bar progress reports exact covered area and updates elapsed time
-  independently of placement completion.
+  **Options → Contour Fill** selects **Analytic** or **Compact Fit** and preserves
+  the selected mode between launches. Analytic is the default. Saved Thin Regions
+  preferences load as Compact Fit; removed fill modes use Analytic.
   Raster Bucket tracing fits curve runs between hard anchors. It first attempts
   a single cubic and then a bounded pair with one shared soft anchor. Corner
   handles can follow the fitted curve within the raster uncertainty band;
@@ -483,9 +457,9 @@ exports grouped `C_group` folders and `C_livery` folders.
   positions, joint cleanup, protrusion area, sampling mode, separate envelope
   and guide rejection counts, shape usage, contour changes and stage timings.
 
-  **Compact Fit — Thin Regions** shares native profile fitting and its shape
-  catalog with Lining. The contour mode accepts closed Pen or Bucket regions,
-  including tapers and cutouts. Its area-fitting backend starts with a
+  The thin-region API shares native profile fitting and its shape catalog with
+  Lining. It accepts closed polygon regions, including tapers and cutouts, through
+  headless callers. Its area-fitting backend starts with a
   search for whole-span native shapes before splitting a region. The fallback
   profile search uses long curve and body candidates. It traces medial paths
   through narrow regions and matches full or partial native shape profiles to
@@ -498,7 +472,7 @@ exports grouped `C_group` folders and `C_livery` folders.
   Raster screening follows stroke width. Profile area limits follow the span
   length and estimated width. Quality fits use additional numerical iterations
   and trimmed profiles.
-  The GUI uses the quality preset. Its overlap envelope
+  The quality preset uses an overlap envelope that
   limits local thickness to 2 times the original, with the outward
   margin as an additional absolute cap. Regions estimate local width from
   inward boundary crossings. Candidate
@@ -535,8 +509,8 @@ exports grouped `C_group` folders and `C_livery` folders.
   Automatic source-image region detection is not part of this API.
   `assets/lining_shapes.json` is reloaded at the start of
   each operation; its task schema is described in `COMPACT_FIT_CONFIG.md`.
-  `thin_fit.log` and `lining_fill.log` record configuration, coverage, topology,
-  boundary measurements and stage timings beside the executable.
+  Headless thin-region diagnostics and `lining_fill.log` record configuration,
+  coverage, topology, boundary measurements and stage timings.
   The API can report phase progress, including profile search stages.
 - Bucket Fill flood-selects pixels with its independent RGBA tolerance and traces
   pixel-square boundaries. Native cubic fitting detects persistent corners at two
@@ -986,9 +960,9 @@ Build output is written to `build/ForzaLiveryStudio`.
 ### Runtime Assets
 
 Runtime assets live in `assets/` (repo root). The build copies that folder next
-to the editor executable. Differential fill reads its shape IDs from
-`assets/differential_shapes.json`, icons live in `assets/icons/`, and vector data
-lives in `assets/vector/`.
+to the editor executable. Compact Fit reads `assets/compact_fit_shapes.json`,
+Lining reads `assets/lining_shapes.json`, icons live in `assets/icons/`, and
+vector data lives in `assets/vector/`.
 
 ## Run
 

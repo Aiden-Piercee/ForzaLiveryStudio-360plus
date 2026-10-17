@@ -171,7 +171,7 @@ private:
                          double width,
                          const std::optional<QColor> &fillColor = std::nullopt);
     using GeneratedFillProgress =
-        std::function<void(int, double, double)>;
+        std::function<void(int, int, int)>;
     using GeneratedFillFunction = std::function<PenFillResult(
         const std::function<bool()> &, const GeneratedFillProgress &)>;
     void prepareGeneratedFill(const std::optional<QColor> &fillColor,
@@ -181,10 +181,10 @@ private:
     void startGeneratedFillTask(GeneratedFillFunction fill);
     void clearGeneratedFillState();
     void cancelActiveFills();
-    void cancelGeneratedFill(bool keepPartial = false);
+    void cancelGeneratedFill();
     void refreshGeneratedFillElapsedTime();
     void updateGeneratedFillProgress(quint64 generation, int placementCount,
-                                     double targetArea, double coveredArea);
+                                     int workCompleted, int workTotal);
     void finishGeneratedFill(quint64 generation, PenFillResult result);
     void cancelRegionFill();
     void updateRegionFillProgress(quint64 generation, const QString &phase,
@@ -336,10 +336,7 @@ private:
     int generatedFillPlacementCount_ = 0;
     int generatedFillWorkCompleted_ = 0;
     int generatedFillWorkTotal_ = 0;
-    double generatedFillTargetArea_ = 0.0;
-    double generatedFillCoveredArea_ = 0.0;
     bool generatedFillMask_ = false;
-    bool generatedFillKeepPartialOnCancel_ = false;
     int regionMergeAreaThreshold_ = 12;
     std::shared_ptr<std::atomic_bool> regionFillCancel_;
     quint64 regionFillGeneration_ = 0;

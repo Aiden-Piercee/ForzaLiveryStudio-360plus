@@ -163,20 +163,11 @@ BehaviorSettings loadBehaviorSettings() {
     BehaviorSettings result = defaults;
     result.insertShapeWithLastSelectedColor = settings.value(QStringLiteral("ui/behavior/insertShapeWithLastSelectedColor"), result.insertShapeWithLastSelectedColor).toBool();
     result.insertShapeWithLastSelectedScale = settings.value(QStringLiteral("ui/behavior/insertShapeWithLastSelectedScale"), result.insertShapeWithLastSelectedScale).toBool();
-    const QVariant legacyDifferentialFill = settings.value(
-        QStringLiteral("ui/behavior/differentiablePenFill"),
-        false);
-    const bool differential = settings.value(
-        QStringLiteral("ui/behavior/differentialContourFill"),
-        legacyDifferentialFill).toBool();
     const QString fillMode = settings.value(QStringLiteral("ui/behavior/contourFillMode"),
-        differential ? QStringLiteral("differential") : QStringLiteral("analytic")).toString();
-    if (fillMode == QStringLiteral("compact") || fillMode == QStringLiteral("catalog")) {
+        QStringLiteral("analytic")).toString();
+    if (fillMode == QStringLiteral("compact") || fillMode == QStringLiteral("catalog")
+        || fillMode == QStringLiteral("thin")) {
         result.contourFillMode = ContourFillMode::CompactFit;
-    } else if (fillMode == QStringLiteral("thin")) {
-        result.contourFillMode = ContourFillMode::ThinRegions;
-    } else if (fillMode == QStringLiteral("differential")) {
-        result.contourFillMode = ContourFillMode::Differential;
     }
     result.showPropertyDebug = settings.value(QStringLiteral("ui/behavior/showPropertyDebug"), result.showPropertyDebug).toBool();
     result.moveToolAutoSelect = settings.value(QStringLiteral("ui/behavior/moveToolAutoSelect"), result.moveToolAutoSelect).toBool();
@@ -231,14 +222,11 @@ void saveBehaviorSettings(const BehaviorSettings &settings) {
     const BehaviorSettings defaults;
     qsettings.setValue(QStringLiteral("ui/behavior/insertShapeWithLastSelectedColor"), settings.insertShapeWithLastSelectedColor);
     qsettings.setValue(QStringLiteral("ui/behavior/insertShapeWithLastSelectedScale"), settings.insertShapeWithLastSelectedScale);
-    qsettings.setValue(QStringLiteral("ui/behavior/differentialContourFill"),
-                       settings.contourFillMode == ContourFillMode::Differential);
-    const QString fillMode = settings.contourFillMode == ContourFillMode::ThinRegions ? QStringLiteral("thin")
-        : settings.contourFillMode == ContourFillMode::CompactFit
-        ? QStringLiteral("compact") : (settings.contourFillMode == ContourFillMode::Differential
-               ? QStringLiteral("differential") : QStringLiteral("analytic"));
+    const QString fillMode = settings.contourFillMode == ContourFillMode::CompactFit
+        ? QStringLiteral("compact") : QStringLiteral("analytic");
     qsettings.setValue(QStringLiteral("ui/behavior/contourFillMode"), fillMode);
     qsettings.remove(QStringLiteral("ui/behavior/differentiablePenFill"));
+    qsettings.remove(QStringLiteral("ui/behavior/differentialContourFill"));
     qsettings.setValue(QStringLiteral("ui/behavior/showPropertyDebug"), settings.showPropertyDebug);
     qsettings.setValue(QStringLiteral("ui/behavior/moveToolAutoSelect"), settings.moveToolAutoSelect);
     qsettings.setValue(QStringLiteral("ui/behavior/allowMoveOutsideBoundingBox"), settings.allowMoveOutsideBoundingBox);

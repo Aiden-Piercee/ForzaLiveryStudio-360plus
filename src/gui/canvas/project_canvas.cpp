@@ -580,10 +580,6 @@ QVector<catalog::Primitive> ProjectCanvas::compactFillPrimitives(QString *error)
     return catalog::buildCatalog(geometry_, error);
 }
 
-QVector<cover::ShapeMesh> ProjectCanvas::differentialCoverCatalog(QString *error) const {
-    return cover::buildShapeCatalog(geometry_, error);
-}
-
 bool ProjectCanvas::canAssignContourLeeway() const {
     return tool_ == QStringLiteral("pen")
         && pen_.closed

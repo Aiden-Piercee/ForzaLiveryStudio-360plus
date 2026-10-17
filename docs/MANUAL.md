@@ -74,7 +74,7 @@ Bucket tool automates the process described in Pen by generating the contour on 
 
 >Clicking with Bucket tool on transparent pixels will still generate a contour but it will be filled with masked shapes instead upon confirmation.
 
->Enable Differential contour fill in the `Options` menu to conserve shapes, the algortihm takes more time and is not deterministic. GPU acceration will be used if available, priority CUDA->DirectX->CPU. You can adjust shape ids in `assets\differential_shapes.json`, ids are displayed in decimal.
+>Choose Analytic or Compact Fit (experimental) from `Options → Contour Fill`. Pen and Bucket use the selected mode. The Lining tool fits open strokes.
 
 >Selecting a layer in Layers widget with `Alt` held will mark it as a leeway layer for new fill pass. The generated fill will try to conserve shapes by accounting for occlusion. 
 

@@ -42,7 +42,7 @@ void MainWindow::setupCanvas() {
             loops, fillColor, fillMask);
     });
     canvas_->setPenFillCancelCallback(
-        [this]() { cancelGeneratedFill(true); });
+        [this]() { cancelGeneratedFill(); });
     canvas_->setLiningFillRequestedCallback(
         [this](const QVector<PenPoint> &points,
                double width,
@@ -545,11 +545,9 @@ void MainWindow::setupOptionsMenu() {
     addBehaviorOption(optionsMenu, QStringLiteral("Use Last Selected Shape Scale for New Shapes"), QStringLiteral("toggle_insert_last_scale"), &BehaviorSettings::insertShapeWithLastSelectedScale);
     QMenu *contourFillMenu = optionsMenu->addMenu(QStringLiteral("Contour Fill"));
     auto *contourFillActions = new QActionGroup(contourFillMenu);
-    const std::array<std::tuple<ContourFillMode, QString, QString>, 4> fillModes = {{
+    const std::array<std::tuple<ContourFillMode, QString, QString>, 2> fillModes = {{
         {ContourFillMode::Analytic, QStringLiteral("Analytic"), QStringLiteral("select_analytic_contour_fill")},
-        {ContourFillMode::Differential, QStringLiteral("Differential"), QStringLiteral("toggle_differential_contour_fill")},
         {ContourFillMode::CompactFit, QStringLiteral("Compact Fit (experimental)"), QStringLiteral("select_compact_contour_fill")},
-        {ContourFillMode::ThinRegions, QStringLiteral("Compact Fit — Thin Regions"), QStringLiteral("select_thin_contour_fill")},
     }};
     for (const auto &[mode, label, shortcut] : fillModes) {
         QAction *action = contourFillMenu->addAction(label);

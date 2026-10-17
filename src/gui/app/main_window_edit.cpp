@@ -8,7 +8,6 @@
 #include "compact_fit.h"
 #include "profile_fit.h"
 #include "thin_fit.h"
-#include "differential_cover.h"
 #include "image_io.h"
 #include "layer_tree_view.h"
 #include "perf_utils.h"
@@ -33,7 +32,7 @@ namespace {
 
 bool usesWorkProgress(const QString &tool) {
 
-    return tool == QStringLiteral("compact") || tool == QStringLiteral("thin") || tool == QStringLiteral("lining");
+    return tool == QStringLiteral("compact") || tool == QStringLiteral("lining");
 }
 
 int stripRasterLayers(std::vector<std::unique_ptr<fls::scene::Layer>> &nodes) {
@@ -95,9 +94,7 @@ QString elapsedDuration(double seconds) {
 
 QJsonObject writePenFillLog(const PenFillRequest &request,
                      const PenFillResult &result,
-                     const QString &strategy,
-                     const cover::FillProfile *profile = nullptr,
-                     const cover::CoverErrorMetrics *metrics = nullptr) {
+                     const QString &strategy) {
     QJsonArray loops;
     const QVector<PenLoop> requestLoops = request.loops.isEmpty()
         ? QVector<PenLoop>{{request.points, PenLoopKind::Outer}}
@@ -161,18 +158,6 @@ QJsonObject writePenFillLog(const PenFillRequest &request,
         placementObject.insert(
             QStringLiteral("coveredArea"),
             placement.area);
-        QJsonArray ownedFeatureIds;
-        for (const int featureId :
-             placement.ownedFeatureIds) {
-            ownedFeatureIds.push_back(
-                featureId);
-        }
-        placementObject.insert(
-            QStringLiteral("ownedFeatureIds"),
-            ownedFeatureIds);
-        placementObject.insert(
-            QStringLiteral("exposedContourArc"),
-            placement.exposedContourArc);
         placementObject.insert(
             QStringLiteral("transform"),
             QJsonArray{
@@ -189,312 +174,6 @@ QJsonObject writePenFillLog(const PenFillRequest &request,
     resultObject.insert(
         QStringLiteral("placements"),
         placements);
-    if (profile != nullptr) {
-        QJsonObject profileObject;
-        profileObject.insert(
-            QStringLiteral("structuralReason"),
-            profile->structuralReason);
-        profileObject.insert(
-            QStringLiteral("meshReason"),
-            profile->meshReason);
-        profileObject.insert(
-            QStringLiteral("areaWindowRatio"),
-            profile->areaWindowRatio);
-        profileObject.insert(
-            QStringLiteral("totalWallSeconds"), profile->totalWallSeconds);
-        profileObject.insert(
-            QStringLiteral("greedySetupWallSeconds"),
-            profile->greedySetupWallSeconds);
-        profileObject.insert(
-            QStringLiteral("candidateBatchWallSeconds"),
-            profile->candidateBatchWallSeconds);
-        profileObject.insert(
-            QStringLiteral("candidateWorkerSeconds"),
-            profile->candidateWorkerSeconds);
-        profileObject.insert(
-            QStringLiteral("adamEvaluationWorkerSeconds"),
-            profile->adamEvaluationWorkerSeconds);
-        profileObject.insert(
-            QStringLiteral("legalizationWorkerSeconds"),
-            profile->legalizationWorkerSeconds);
-        profileObject.insert(
-            QStringLiteral("residualUpdateWallSeconds"),
-            profile->residualUpdateWallSeconds);
-        profileObject.insert(
-            QStringLiteral("finalMeasurementWallSeconds"),
-            profile->finalMeasurementWallSeconds);
-        profileObject.insert(
-            QStringLiteral("gpuEvaluationWallSeconds"),
-            profile->gpuEvaluationWallSeconds);
-        profileObject.insert(
-            QStringLiteral("nudgeWallSeconds"),
-            profile->nudgeWallSeconds);
-        profileObject.insert(
-            QStringLiteral("pruneWallSeconds"),
-            profile->pruneWallSeconds);
-        profileObject.insert(
-            QStringLiteral("repairWallSeconds"),
-            profile->repairWallSeconds);
-        profileObject.insert(
-            QStringLiteral("continuityWallSeconds"),
-            profile->continuityWallSeconds);
-        profileObject.insert(
-            QStringLiteral("preContinuityEnergy"),
-            profile->preContinuityEnergy);
-        profileObject.insert(
-            QStringLiteral("postContinuityEnergy"),
-            profile->postContinuityEnergy);
-        profileObject.insert(
-            QStringLiteral("preNudgeResidualArea"),
-            profile->preNudgeResidualArea);
-        profileObject.insert(
-            QStringLiteral("postNudgeResidualArea"),
-            profile->postNudgeResidualArea);
-        profileObject.insert(
-            QStringLiteral("prePruneResidualArea"),
-            profile->prePruneResidualArea);
-        profileObject.insert(
-            QStringLiteral("postPruneResidualArea"),
-            profile->postPruneResidualArea);
-        profileObject.insert(
-            QStringLiteral("repairTargetArea"),
-            profile->repairTargetArea);
-        profileObject.insert(
-            QStringLiteral("postRepairNewGapArea"),
-            profile->postRepairNewGapArea);
-        profileObject.insert(
-            QStringLiteral("repairCoveredArea"),
-            profile->repairCoveredArea);
-        profileObject.insert(
-            QStringLiteral("structuralExplainedBoundaryFraction"),
-            profile->structuralExplainedBoundaryFraction);
-        profileObject.insert(
-            QStringLiteral("structuralCoverageRatio"),
-            profile->structuralCoverageRatio);
-        profileObject.insert(
-            QStringLiteral("structuralResidualArea"),
-            profile->structuralResidualArea);
-        profileObject.insert(
-            QStringLiteral("structuralResidualThickness"),
-            profile->structuralResidualThickness);
-        profileObject.insert(
-            QStringLiteral("structuralOutsideArea"),
-            profile->structuralOutsideArea);
-        profileObject.insert(
-            QStringLiteral("meshCoverageRatio"),
-            profile->meshCoverageRatio);
-        profileObject.insert(
-            QStringLiteral("meshResidualArea"),
-            profile->meshResidualArea);
-        profileObject.insert(
-            QStringLiteral("meshOutsideArea"),
-            profile->meshOutsideArea);
-        profileObject.insert(
-            QStringLiteral("meshScale"),
-            profile->meshScale);
-        profileObject.insert(
-            QStringLiteral("evaluationBackend"),
-            profile->evaluationBackend);
-        profileObject.insert(
-            QStringLiteral("gpuAdapter"), profile->gpuAdapter);
-        profileObject.insert(
-            QStringLiteral("gpuError"), profile->gpuError);
-        profileObject.insert(
-            QStringLiteral("candidateJobs"),
-            static_cast<qint64>(profile->candidateJobs));
-        profileObject.insert(
-            QStringLiteral("adamEvaluations"),
-            static_cast<qint64>(profile->adamEvaluations));
-        profileObject.insert(
-            QStringLiteral("legalizationEvaluations"),
-            static_cast<qint64>(profile->legalizationEvaluations));
-        profileObject.insert(
-            QStringLiteral("gpuBatches"),
-            static_cast<qint64>(profile->gpuBatches));
-        profileObject.insert(
-            QStringLiteral("gpuIntersectionTasks"),
-            static_cast<qint64>(profile->gpuIntersectionTasks));
-        profileObject.insert(
-            QStringLiteral("wholeComponentJobs"),
-            static_cast<qint64>(profile->wholeComponentJobs));
-        profileObject.insert(
-            QStringLiteral("hardEdgeCandidates"),
-            static_cast<qint64>(profile->hardEdgeCandidates));
-        profileObject.insert(
-            QStringLiteral("featureCandidateJobs"),
-            static_cast<qint64>(
-                profile->featureCandidateJobs));
-        profileObject.insert(
-            QStringLiteral("featureCandidateRejections"),
-            static_cast<qint64>(
-                profile->featureCandidateRejections));
-        profileObject.insert(
-            QStringLiteral(
-                "selectionInsufficientGainRejections"),
-            static_cast<qint64>(
-                profile
-                    ->selectionInsufficientGainRejections));
-        profileObject.insert(
-            QStringLiteral(
-                "selectionEnvelopeRejections"),
-            static_cast<qint64>(
-                profile
-                    ->selectionEnvelopeRejections));
-        profileObject.insert(
-            QStringLiteral(
-                "selectionOutwardDistanceRejections"),
-            static_cast<qint64>(
-                profile
-                    ->selectionOutwardDistanceRejections));
-        profileObject.insert(
-            QStringLiteral(
-                "selectionFeatureRejections"),
-            static_cast<qint64>(
-                profile
-                    ->selectionFeatureRejections));
-        profileObject.insert(
-            QStringLiteral("nudgeOptimizations"),
-            static_cast<qint64>(
-                profile->nudgeOptimizations));
-        profileObject.insert(
-            QStringLiteral("pruneAttempts"),
-            static_cast<qint64>(profile->pruneAttempts));
-        profileObject.insert(
-            QStringLiteral("pruneOptimizations"),
-            static_cast<qint64>(profile->pruneOptimizations));
-        profileObject.insert(
-            QStringLiteral("continuityProposals"),
-            static_cast<qint64>(
-                profile->continuityProposals));
-        profileObject.insert(
-            QStringLiteral("greedySteps"), profile->greedySteps);
-        profileObject.insert(
-            QStringLiteral("complexitySelections"),
-            profile->complexitySelections);
-        profileObject.insert(
-            QStringLiteral("localComponentPlacements"),
-            profile->localComponentPlacements);
-        profileObject.insert(
-            QStringLiteral("wholeComponentPlacements"),
-            profile->wholeComponentPlacements);
-        profileObject.insert(
-            QStringLiteral("hardEdgePlacements"),
-            profile->hardEdgePlacements);
-        profileObject.insert(
-            QStringLiteral("featureSelectedPlacements"),
-            profile->featureSelectedPlacements);
-        profileObject.insert(
-            QStringLiteral("nudgedPlacements"),
-            profile->nudgedPlacements);
-        profileObject.insert(
-            QStringLiteral("prunedPlacements"),
-            profile->prunedPlacements);
-        profileObject.insert(
-            QStringLiteral("adjustedPlacements"),
-            profile->adjustedPlacements);
-        profileObject.insert(
-            QStringLiteral("prunePasses"),
-            profile->prunePasses);
-        profileObject.insert(
-            QStringLiteral("preContinuityKinks"),
-            profile->preContinuityKinks);
-        profileObject.insert(
-            QStringLiteral("postContinuityKinks"),
-            profile->postContinuityKinks);
-        profileObject.insert(
-            QStringLiteral("stabilizedPlacements"),
-            profile->stabilizedPlacements);
-        profileObject.insert(
-            QStringLiteral("repairSteps"),
-            profile->repairSteps);
-        profileObject.insert(
-            QStringLiteral("repairPlacements"),
-            profile->repairPlacements);
-        profileObject.insert(
-            QStringLiteral("structuralGridCells"),
-            profile->structuralGridCells);
-        profileObject.insert(
-            QStringLiteral("structuralRectangleCandidates"),
-            profile->structuralRectangleCandidates);
-        profileObject.insert(
-            QStringLiteral("structuralRectangles"),
-            profile->structuralRectangles);
-        profileObject.insert(
-            QStringLiteral("meshPlacements"),
-            profile->meshPlacements);
-        profileObject.insert(
-            QStringLiteral("workerThreads"), profile->workerThreads);
-        profileObject.insert(
-            QStringLiteral("structuralAccepted"),
-            profile->structuralAccepted);
-        profileObject.insert(
-            QStringLiteral("structuralSeeded"),
-            profile->structuralSeeded);
-        profileObject.insert(
-            QStringLiteral("meshAccepted"),
-            profile->meshAccepted);
-        resultObject.insert(QStringLiteral("profile"), profileObject);
-    }
-    if (metrics != nullptr) {
-        QJsonObject metricsObject;
-        metricsObject.insert(
-            QStringLiteral("missingArea"),
-            metrics->missingArea);
-        metricsObject.insert(
-            QStringLiteral("outsideTargetArea"),
-            metrics->outsideTargetArea);
-        metricsObject.insert(
-            QStringLiteral("outsideEnvelopeArea"),
-            metrics->outsideEnvelopeArea);
-        metricsObject.insert(
-            QStringLiteral("tverskySimilarity"),
-            metrics->tversky);
-        metricsObject.insert(
-            QStringLiteral("meanBoundaryDistance"),
-            metrics->meanBoundaryDistance);
-        metricsObject.insert(
-            QStringLiteral("boundaryDistanceRms"),
-            metrics->boundaryDistanceRms);
-        metricsObject.insert(
-            QStringLiteral("boundaryDistance95"),
-            metrics->boundaryDistance95);
-        metricsObject.insert(
-            QStringLiteral("maximumOutwardDistance"),
-            metrics->maximumOutwardDistance);
-        metricsObject.insert(
-            QStringLiteral("boundaryFScore"),
-            metrics->boundaryFScore);
-        metricsObject.insert(
-            QStringLiteral("representedFeatureCount"),
-            metrics->representedFeatures);
-        metricsObject.insert(
-            QStringLiteral("targetFeatureCount"),
-            metrics->totalFeatures);
-        metricsObject.insert(
-            QStringLiteral("representedFeatureWeight"),
-            metrics->representedFeatureWeight);
-        metricsObject.insert(
-            QStringLiteral("totalFeatureWeight"),
-            metrics->totalFeatureWeight);
-        metricsObject.insert(
-            QStringLiteral("meanFeatureDistance"),
-            metrics->meanFeatureDistance);
-        metricsObject.insert(
-            QStringLiteral("featureDistance95"),
-            metrics->featureDistance95);
-        metricsObject.insert(
-            QStringLiteral("maximumFeatureDistance"),
-            metrics->maximumFeatureDistance);
-        metricsObject.insert(
-            QStringLiteral("meanTangentError"),
-            metrics->meanTangentError);
-        metricsObject.insert(
-            QStringLiteral("maximumTangentError"),
-            metrics->maximumTangentError);
-        resultObject.insert(
-            QStringLiteral("coverMetrics"),
-            metricsObject);
-    }
 
     QJsonObject root;
     root.insert(QStringLiteral("request"), requestObject);
@@ -514,56 +193,6 @@ QJsonObject writePenFillLog(const PenFillRequest &request,
     return root;
 }
 
-PenFillResult differentialContourFill(
-    const cover::FillInput &input,
-    const QVector<cover::ShapeMesh> &catalog,
-    const cover::FillOptions &options,
-    const std::function<bool()> &cancelled,
-    const std::function<void(int, double, double)> &progress,
-    cover::FillProfile *profile,
-    cover::CoverErrorMetrics *metrics) {
-    const cover::FillResult fill =
-        cover::analyticCoverFill(
-            input, catalog, options, cancelled,
-            [&progress](const cover::FillProgress &fillProgress) {
-                if (progress) {
-                    progress(
-                        fillProgress.placementCount,
-                        fillProgress.targetArea,
-                        fillProgress.coveredArea);
-                }
-            });
-    if (profile != nullptr) {
-        *profile = fill.profile;
-    }
-    if (metrics != nullptr) {
-        *metrics = fill.metrics;
-    }
-    PenFillResult result;
-    result.targetArea = fill.coveredArea + fill.residualArea;
-    result.coveredArea = fill.coveredArea;
-    result.outsideArea = fill.outsideArea;
-    result.shapeLimit = options.budget;
-    result.cancelled = fill.cancelled;
-    result.timedOut = fill.timedOut;
-    result.error = fill.error;
-    result.unfilled = cover::painterPathFromPolygons(fill.residual);
-    result.placements.reserve(fill.placements.size());
-    for (const cover::Placement &placement : fill.placements) {
-        PenPlacement item;
-        item.shapeId = placement.shapeId;
-        item.transform = cover::toQTransform(placement.transform);
-        item.area = placement.coveredArea;
-        item.ownedFeatureIds =
-            placement.ownedFeatureIds;
-        item.exposedContourArc =
-            placement.exposedContourArc;
-        result.placements.push_back(item);
-    }
-
-    return result;
-}
-
 } // namespace
 
 void MainWindow::startPenFill(const QVector<PenLoop> &loops,
@@ -576,25 +205,16 @@ void MainWindow::startPenFill(const QVector<PenLoop> &loops,
         return;
     }
     const ContourFillMode fillMode = loadBehaviorSettings().contourFillMode;
-    const bool differential = fillMode == ContourFillMode::Differential;
-    const bool thinFit = fillMode == ContourFillMode::ThinRegions;
-    const bool compactFit = fillMode == ContourFillMode::CompactFit || thinFit;
-    const QString fillLabel = thinFit ? QStringLiteral("Thin region fit") : compactFit ? QStringLiteral("Compact fit")
-        : (differential ? QStringLiteral("Differential contour fill") : QStringLiteral("Analytic contour fill"));
-    const QString fillTool = thinFit ? QStringLiteral("thin") : compactFit ? QStringLiteral("compact")
-        : (differential ? QStringLiteral("differential") : QStringLiteral("analytic"));
+    const bool compactFit = fillMode == ContourFillMode::CompactFit;
+    const QString fillLabel = compactFit ? QStringLiteral("Compact fit") : QStringLiteral("Analytic contour fill");
+    const QString fillTool = compactFit ? QStringLiteral("compact") : QStringLiteral("analytic");
     compact::FillOptions compactOptions;
     compactOptions.retainFailedFill = true;
-    if (thinFit)
-        compactOptions.boundaryAllowance = thin::kDefaultBoundaryAllowance;
     if (compactFit && !fillMask) {
         bool accepted = false;
         compactOptions.boundaryAllowance = QInputDialog::getDouble(this,
-            thinFit ? QStringLiteral("Thin Regions") : QStringLiteral("Compact Fit"),
-            thinFit ? QStringLiteral("Maximum outward overlap (world units):\nPreferred thickness: %1 times the original; limit: %2 times.\nAt least 98% of the selected region must be covered.")
-                .arg(thin::kQualityPreferredThicknessRatio, 0, 'g', 3)
-                .arg(thin::kQualityMaximumThicknessRatio, 0, 'g', 3)
-                : QStringLiteral("Outward allowance (world units, per axis):\nInward gap target: %1 world units. Total area error target: %2%.\nSmooth boundaries and sharp corners are checked separately.\nGenerated shapes are kept with a warning if checks fail.")
+            QStringLiteral("Compact Fit"),
+            QStringLiteral("Outward allowance (world units, per axis):\nInward gap target: %1 world units. Total area error target: %2%.\nSmooth boundaries and sharp corners are checked separately.\nGenerated shapes are kept with a warning if checks fail.")
                 .arg(compactOptions.inwardAllowance, 0, 'g', 3)
                 .arg(compactOptions.areaErrorRatio * 100.0, 0, 'g', 3),
             compactOptions.boundaryAllowance, 0.01, 1000.0, 2, &accepted);
@@ -614,8 +234,7 @@ void MainWindow::startPenFill(const QVector<PenLoop> &loops,
     if (compactFit) {
         QString catalogError;
         generatedFillColor_[3] = 255;
-        const QVector<catalog::Primitive> primitives = thinFit
-            ? canvas_->thinFillPrimitives(&catalogError) : canvas_->compactFillPrimitives(&catalogError);
+        const QVector<catalog::Primitive> primitives = canvas_->compactFillPrimitives(&catalogError);
         if (primitives.isEmpty() || fillMask) {
             canvas_->setPenFillRunning(false);
             clearGeneratedFillState();
@@ -634,7 +253,7 @@ void MainWindow::startPenFill(const QVector<PenLoop> &loops,
                     QStringLiteral("Compact Fit failed: %1").arg(leewayError), 5000);
                 return;
             }
-            compactOptions.leeway = cover::polygonsFromPainterPath(leewayPath);
+            compactOptions.leeway = leewayPath.toSubpathPolygons();
             generatedFillLeewayGroupId_ = contourLeewayGroupId_;
         }
         generatedFillProgress_->setRange(0, 0);
@@ -645,23 +264,16 @@ void MainWindow::startPenFill(const QVector<PenLoop> &loops,
             .arg(fillLabel, interactionShortcutText(KeyInteraction::CanvasCancelInteraction)));
         const QString strategy = fillTool + (fillColor.has_value()
             ? QStringLiteral("-bucket") : QStringLiteral("-pen"));
-        startGeneratedFillTask([request = std::move(request), primitives, strategy, compactOptions, thinFit](
+        startGeneratedFillTask([request = std::move(request), primitives, strategy, compactOptions](
             const std::function<bool()> &cancelled, const GeneratedFillProgress &progress) {
             auto options = compactOptions;
             QElapsedTimer timer;
             timer.start();
-            options.workProgress = [progress](int count, int evaluated, int budget) {
-                progress(count, budget, evaluated);
-            };
-            auto thinOptions = thin::qualityOptions();
-            thinOptions.boundaryAllowance = options.boundaryAllowance;
-            thinOptions.leeway = options.leeway;
-            thinOptions.workProgress = options.workProgress;
-            catalog::FillResult result = thinFit ? thin::fillRegion(request, primitives, thinOptions, cancelled)
-                : profile::fillRegion(request, primitives, options, cancelled);
+            options.workProgress = progress;
+            catalog::FillResult result = profile::fillRegion(request, primitives, options, cancelled);
             const auto replay = writePenFillLog(request, result.fill, strategy);
             QFile log(QDir(QCoreApplication::applicationDirPath()).filePath(
-                thinFit ? QStringLiteral("thin_fit.log") : QStringLiteral("compact_fit.log")));
+                QStringLiteral("compact_fit.log")));
             result.diagnostics.insert(QStringLiteral("error"), result.fill.error);
             result.diagnostics.insert(QStringLiteral("cancelled"), result.fill.cancelled);
             result.diagnostics.insert(QStringLiteral("elapsedMilliseconds"), timer.elapsed());
@@ -673,93 +285,6 @@ void MainWindow::startPenFill(const QVector<PenLoop> &loops,
 
             return result.fill;
         });
-        return;
-    }
-    if (differential) {
-        QString catalogError;
-        const QVector<cover::ShapeMesh> catalog =
-            canvas_->differentialCoverCatalog(&catalogError);
-        const PenContour contour = buildPenContour(
-            request.loops, request.boundaryTolerance * 0.25);
-        const cover::Polygons polygons = contour.valid()
-            ? cover::polygonsFromPainterPath(contour.path)
-            : cover::Polygons{};
-        if (catalog.isEmpty() || polygons.isEmpty()) {
-            canvas_->setPenFillRunning(false);
-            clearGeneratedFillState();
-            const QString reason = !catalogError.isEmpty()
-                ? catalogError
-                : (contour.error.isEmpty()
-                       ? QStringLiteral("The active contour is unavailable")
-                       : contour.error);
-            statusBar()->showMessage(
-                QStringLiteral("Differential contour fill failed: %1").arg(reason),
-                4000);
-            return;
-        }
-
-        cover::FillInput input;
-        input.mustCover = polygons;
-        if (!contourLeewayGroupId_.isEmpty()) {
-            QString leewayError;
-            const QPainterPath leewayPath =
-                canvas_->contourLeewayPath(&leewayError);
-            if (leewayPath.isEmpty()) {
-                canvas_->setPenFillRunning(false);
-                clearGeneratedFillState();
-                statusBar()->showMessage(
-                    QStringLiteral("Differential contour fill failed: %1")
-                        .arg(leewayError),
-                    5000);
-                return;
-            }
-            input.leeway =
-                cover::polygonsFromPainterPath(leewayPath);
-            generatedFillLeewayGroupId_ =
-                contourLeewayGroupId_;
-        }
-        for (const PenContourLoop &loop : contour.loops) {
-            input.boundaryLoops.push_back(loop.segments);
-        }
-        cover::FillOptions options;
-        options.boundaryTolerance =
-            request.boundaryTolerance;
-        options.useWeightedContour = true;
-        input.mayCover =
-            cover::expandedCoverEnvelope(
-                polygons,
-                options.boundaryTolerance);
-        generatedFillProgress_->setRange(0, 0);
-        generatedFillProgress_->setFormat(
-            QStringLiteral("Differential fill | Elapsed 0s"));
-        generatedFillProgress_->show();
-        canvas_->setPenFillRunning(
-            true, QStringLiteral("Optimizing differential contour fill…"));
-        statusBar()->showMessage(
-            QStringLiteral("Optimizing differential contour fill… Press %1 to cancel")
-                .arg(interactionShortcutText(
-                    KeyInteraction::CanvasCancelInteraction)));
-        const QString strategy = fillColor.has_value()
-            ? QStringLiteral("differential-bucket")
-            : QStringLiteral("differential-pen");
-        startGeneratedFillTask(
-            [request = std::move(request), input = std::move(input),
-             catalog, options, strategy](
-                const std::function<bool()> &cancelled,
-                const GeneratedFillProgress &progress) {
-                cover::FillProfile profile;
-                cover::CoverErrorMetrics metrics;
-                PenFillResult result =
-                    differentialContourFill(
-                        input, catalog, options,
-                        cancelled, progress,
-                        &profile, &metrics);
-                writePenFillLog(
-                    request, result, strategy,
-                    &profile, &metrics);
-
-                return result;
-            });
         return;
     }
 
@@ -819,9 +344,7 @@ void MainWindow::startLiningFill(const QVector<PenPoint> &points,
                                const GeneratedFillProgress &progress) {
         auto options = thin::qualityOptions();
         options.liningOutsideMarginWidthFraction = outsideMargin;
-        options.workProgress = [progress](int count, int evaluated, int budget) {
-            progress(count, budget, evaluated);
-        };
+        options.workProgress = progress;
         QElapsedTimer timer;
         timer.start();
         auto result = thin::fillLiningPath(points, width, primitives, options, cancelled);
@@ -865,13 +388,10 @@ void MainWindow::startGeneratedFillTask(GeneratedFillFunction fill) {
             ? QStringLiteral("Percentage of the search score budget used, not a time estimate. Preparation and verification depend on contour complexity.")
             : QString());
     }
-    if (generatedFillTool_ == QStringLiteral("differential")
-        || usesWorkProgress(generatedFillTool_)) {
+    if (usesWorkProgress(generatedFillTool_)) {
         generatedFillPlacementCount_ = 0;
         generatedFillWorkCompleted_ = 0;
         generatedFillWorkTotal_ = 0;
-        generatedFillTargetArea_ = 0.0;
-        generatedFillCoveredArea_ = 0.0;
         generatedFillElapsed_.restart();
         generatedFillElapsedTimer_->start();
     }
@@ -882,19 +402,16 @@ void MainWindow::startGeneratedFillTask(GeneratedFillFunction fill) {
             [token]() {
                 return token->load(std::memory_order_relaxed);
             },
-            [guard, generation](int placementCount, double targetArea,
-                                double coveredArea) {
+            [guard, generation](int placementCount, int workCompleted, int workTotal) {
                 if (guard.isNull()) {
                     return;
                 }
                 QMetaObject::invokeMethod(
                     guard.data(),
-                    [guard, generation, placementCount, targetArea,
-                     coveredArea]() {
+                    [guard, generation, placementCount, workCompleted, workTotal]() {
                         if (!guard.isNull()) {
                             guard->updateGeneratedFillProgress(
-                                generation, placementCount, targetArea,
-                                coveredArea);
+                                generation, placementCount, workCompleted, workTotal);
                         }
                     },
                     Qt::QueuedConnection);
@@ -925,15 +442,12 @@ void MainWindow::clearGeneratedFillState() {
     generatedFillPlacementCount_ = 0;
     generatedFillWorkCompleted_ = 0;
     generatedFillWorkTotal_ = 0;
-    generatedFillTargetArea_ = 0.0;
-    generatedFillCoveredArea_ = 0.0;
     generatedFillInsertionEntries_.clear();
     generatedFillLabel_.clear();
     generatedFillGuideSelection_.clear();
     generatedFillTool_.clear();
     generatedFillLeewayGroupId_.clear();
     generatedFillMask_ = false;
-    generatedFillKeepPartialOnCancel_ = false;
 }
 
 void MainWindow::cancelActiveFills() {
@@ -941,29 +455,11 @@ void MainWindow::cancelActiveFills() {
     cancelRegionFill();
 }
 
-void MainWindow::cancelGeneratedFill(bool keepPartial) {
+void MainWindow::cancelGeneratedFill() {
     if (generatedFillCancel_ == nullptr) {
         return;
     }
     generatedFillCancel_->store(true, std::memory_order_relaxed);
-    const bool finalizePartial =
-        keepPartial
-        && generatedFillTool_
-            == QStringLiteral("differential");
-    if (finalizePartial) {
-        generatedFillKeepPartialOnCancel_ = true;
-        generatedFillElapsedTimer_->stop();
-        statusBar()->showMessage(
-            QStringLiteral(
-                "Finalizing %1 with generated shapes")
-                .arg(generatedFillLabel_));
-        if (generatedFillProgress_ != nullptr) {
-            generatedFillProgress_->setFormat(
-                QStringLiteral(
-                    "Finalizing differential fill"));
-        }
-        return;
-    }
     generatedFillCancel_.reset();
     ++generatedFillGeneration_;
     if (canvas_ != nullptr) {
@@ -976,91 +472,41 @@ void MainWindow::cancelGeneratedFill(bool keepPartial) {
 
 void MainWindow::refreshGeneratedFillElapsedTime() {
     if (generatedFillCancel_ == nullptr
-        || generatedFillKeepPartialOnCancel_
-        || (generatedFillTool_ != QStringLiteral("differential")
-            && !usesWorkProgress(generatedFillTool_))
+        || !usesWorkProgress(generatedFillTool_)
         || generatedFillProgress_ == nullptr
         || !generatedFillElapsed_.isValid()) {
         return;
     }
 
+    const QString duration = elapsedDuration(static_cast<double>(generatedFillElapsed_.elapsed()) / 1000.0);
     constexpr int kProgressResolution = 1000;
-    const double elapsedSeconds =
-        static_cast<double>(generatedFillElapsed_.elapsed()) / 1000.0;
-    const QString duration = elapsedDuration(elapsedSeconds);
-    if (usesWorkProgress(generatedFillTool_)) {
-        const double fraction = generatedFillWorkTotal_ > 0
-            ? std::clamp(static_cast<double>(generatedFillWorkCompleted_) / generatedFillWorkTotal_, 0.0, 1.0) : 0.0;
-        generatedFillProgress_->setRange(0, generatedFillWorkTotal_ > 0 ? kProgressResolution : 0);
-        generatedFillProgress_->setValue(static_cast<int>(fraction * kProgressResolution));
-        generatedFillProgress_->setFormat(generatedFillWorkTotal_ > 0
-            ? QStringLiteral("%1 | Work %2% | Elapsed %3 | %4 shapes")
-                .arg(generatedFillLabel_).arg(fraction * 100.0, 0, 'f', 1).arg(duration).arg(generatedFillPlacementCount_)
-            : QStringLiteral("%1 | Elapsed %2 | %3 shapes")
-                .arg(generatedFillLabel_, duration).arg(generatedFillPlacementCount_));
-        generatedFillProgress_->show();
-        return;
-    }
-    const QString fillName = QStringLiteral("Differential fill");
-    if (!std::isfinite(generatedFillTargetArea_)
-        || generatedFillTargetArea_ <= 0.0
-        || !std::isfinite(generatedFillCoveredArea_)) {
-        generatedFillProgress_->setRange(0, 0);
-        generatedFillProgress_->setFormat(
-            QStringLiteral(
-                "%1 | Elapsed %2 | %3 shapes")
-                .arg(fillName, duration)
-                .arg(generatedFillPlacementCount_));
-        generatedFillProgress_->show();
-        return;
-    }
-
-    const double fraction =
-        std::clamp(
-            generatedFillCoveredArea_ / generatedFillTargetArea_,
-            0.0, 1.0);
-    const QString percentage =
-        QString::number(fraction * 100.0, 'f', 1);
-    const QString format =
-        QStringLiteral(
-            "%1 %2% | Elapsed %3 | %4 shapes")
-            .arg(fillName, percentage, duration)
-            .arg(generatedFillPlacementCount_);
-
-    generatedFillProgress_->setRange(0, kProgressResolution);
-    generatedFillProgress_->setValue(
-        std::clamp(
-            static_cast<int>(
-                std::lround(fraction * kProgressResolution)),
-            0, kProgressResolution));
-    generatedFillProgress_->setFormat(format);
+    const double fraction = generatedFillWorkTotal_ > 0
+        ? std::clamp(static_cast<double>(generatedFillWorkCompleted_) / generatedFillWorkTotal_, 0.0, 1.0) : 0.0;
+    generatedFillProgress_->setRange(0, generatedFillWorkTotal_ > 0 ? kProgressResolution : 0);
+    generatedFillProgress_->setValue(static_cast<int>(fraction * kProgressResolution));
+    generatedFillProgress_->setFormat(generatedFillWorkTotal_ > 0
+        ? QStringLiteral("%1 | Work %2% | Elapsed %3 | %4 shapes")
+            .arg(generatedFillLabel_).arg(fraction * 100.0, 0, 'f', 1).arg(duration).arg(generatedFillPlacementCount_)
+        : QStringLiteral("%1 | Elapsed %2 | %3 shapes")
+            .arg(generatedFillLabel_, duration).arg(generatedFillPlacementCount_));
     generatedFillProgress_->show();
 }
 
 void MainWindow::updateGeneratedFillProgress(quint64 generation,
                                              int placementCount,
-                                             double targetArea,
-                                             double coveredArea) {
+                                             int workCompleted,
+                                             int workTotal) {
     if (generation != generatedFillGeneration_
         || generatedFillCancel_ == nullptr
-        || generatedFillKeepPartialOnCancel_
-        || (generatedFillTool_ != QStringLiteral("differential")
-            && !usesWorkProgress(generatedFillTool_))
+        || !usesWorkProgress(generatedFillTool_)
         || generatedFillProgress_ == nullptr
-        || !std::isfinite(targetArea) || targetArea < 0.0
-        || !std::isfinite(coveredArea)) {
+        || workCompleted < 0 || workTotal < 0) {
         return;
     }
 
     generatedFillPlacementCount_ = placementCount;
-    if (usesWorkProgress(generatedFillTool_)) {
-        generatedFillWorkTotal_ = static_cast<int>(targetArea);
-        generatedFillWorkCompleted_ = static_cast<int>(coveredArea);
-        refreshGeneratedFillElapsedTime();
-        return;
-    }
-    generatedFillTargetArea_ = targetArea;
-    generatedFillCoveredArea_ = coveredArea;
+    generatedFillWorkTotal_ = workTotal;
+    generatedFillWorkCompleted_ = workCompleted;
     refreshGeneratedFillElapsedTime();
 }
 
@@ -1076,23 +522,13 @@ void MainWindow::finishGeneratedFill(quint64 generation, PenFillResult result) {
             canvas_->setPenFillRunning(false);
         }
     }
-    const bool differential =
-        generatedFillTool_
-        == QStringLiteral("differential");
-    const bool retainPartial =
-        result.cancelled
-        && differential
-        && !result.placements.isEmpty()
-        && (result.timedOut
-            || generatedFillKeepPartialOnCancel_);
-    if (result.cancelled && !retainPartial) {
+    if (result.cancelled) {
         statusBar()->showMessage(QStringLiteral("%1 cancelled").arg(generatedFillLabel_), 1500);
         clearGeneratedFillState();
         return;
     }
     const bool lining = generatedFillTool_ == QStringLiteral("lining");
-    const bool thinFit = generatedFillTool_ == QStringLiteral("thin");
-    if (((lining || thinFit) && !result.error.isEmpty()) || result.placements.isEmpty() || !state_->hasProject()) {
+    if ((lining && !result.error.isEmpty()) || result.placements.isEmpty() || !state_->hasProject()) {
         statusBar()->showMessage(QStringLiteral("%1 failed: %2")
                                      .arg(generatedFillLabel_)
                                      .arg(result.error.isEmpty() ? QStringLiteral("no shapes generated") : result.error),
@@ -1109,26 +545,12 @@ void MainWindow::finishGeneratedFill(quint64 generation, PenFillResult result) {
     const bool compactFit = generatedFillTool_ == QStringLiteral("compact");
     const QString groupName = lining
         ? QStringLiteral("Lining")
-        : (thinFit ? QStringLiteral("Thin Region Fit") : compactFit ? QStringLiteral("Compact Fit") : (differential
-               ? QStringLiteral("Differential Contour Fill")
-               : QStringLiteral("Analytic Contour Fill")));
+        : (compactFit ? QStringLiteral("Compact Fit") : QStringLiteral("Analytic Contour Fill"));
     insertGeneratedFill(groupName, groupName, placements);
     if (compactFit) {
         statusBar()->showMessage(QStringLiteral("Created Compact Fit with %1 shapes; missing %2, spill %3 world²")
             .arg(placements.size()).arg(result.targetArea - result.coveredArea, 0, 'g', 6)
             .arg(result.outsideArea, 0, 'g', 6), 8000);
-    }
-    if (differential) {
-        const double residualArea =
-            std::max(0.0, result.targetArea - result.coveredArea);
-        if (residualArea > cover::kDefaultEpsArea) {
-            statusBar()->showMessage(
-                QStringLiteral(
-                    "Created Differential Contour Fill with %1 shapes; %2 world² remains uncovered")
-                    .arg(placements.size())
-                    .arg(residualArea, 0, 'g', 10),
-                5000);
-        }
     }
     if (!result.error.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("Created %1 with %2 shapes. Warning: %3")
@@ -1225,11 +647,9 @@ void MainWindow::insertGeneratedFill(const QString &groupName,
 void MainWindow::toggleContourLeewayGroup(
     const QString &groupId) {
     if (canvas_ == nullptr
-        || (loadBehaviorSettings().contourFillMode != ContourFillMode::Differential
-            && loadBehaviorSettings().contourFillMode != ContourFillMode::CompactFit
-            && loadBehaviorSettings().contourFillMode != ContourFillMode::ThinRegions)) {
+        || loadBehaviorSettings().contourFillMode != ContourFillMode::CompactFit) {
         statusBar()->showMessage(
-            QStringLiteral("Contour leeway requires Differential or Compact Fit Contour Fill"),
+            QStringLiteral("Contour leeway requires Compact Fit Contour Fill"),
             3000);
         return;
     }
