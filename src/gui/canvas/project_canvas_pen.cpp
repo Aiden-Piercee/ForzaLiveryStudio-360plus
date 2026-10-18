@@ -537,6 +537,29 @@ void ProjectCanvas::refreshPenInteractionHint(const QPointF &screenPoint,
     update();
 }
 
+QPointF ProjectCanvas::liningCapHandlePosition(int pointIndex) const {
+    const auto &point = lining_.points[pointIndex];
+    const double offset = camera_.worldPerPixel() * kLiningWidthHandleOffsetPixels;
+    const double depth = point.endCap * liningPointWidth(point, lining_.strokeWidth) * 0.5;
+
+    return worldToScreen(point.position + liningEndpointDirection(lining_.points, pointIndex) * (depth + offset));
+}
+
+ProjectCanvas::PenPointHit ProjectCanvas::liningCapHandleAtScreen(const QPointF &screenPoint) const {
+    PenPointHit result;
+    if (!lining_.closed || lining_.points.size() < 2) return result;
+    for (int index : {0, static_cast<int>(lining_.points.size()) - 1}) {
+        const double distance = QLineF(screenPoint, liningCapHandlePosition(index)).length();
+        if (distance <= kPenEditRadius && distance < result.screenDistance) {
+            result.pointIndex = index;
+            result.handle = 3;
+            result.screenDistance = distance;
+        }
+    }
+
+    return result;
+}
+
 QPointF ProjectCanvas::liningWidthNormal(int pointIndex) const {
     const auto segments = penSegments(lining_.points, false);
     QPointF direction;
@@ -620,8 +643,17 @@ void ProjectCanvas::refreshLiningInteractionHint(const QPointF &screenPoint,
     lining_.hoverPoint = -1;
     lining_.hoverHandle = 0;
     lining_.hoverCurve = {};
+    const auto capHit = liningCapHandleAtScreen(screenPoint);
+    if (capHit.valid() || (lining_.dragPoint >= 0 && lining_.dragHandle == 3)) {
+        lining_.hoverPoint = lining_.dragPoint >= 0 ? lining_.dragPoint : capHit.pointIndex;
+        lining_.hoverHandle = 3;
+        setCursorHint(screenPoint, {QStringLiteral("Drag outward: Convex cap"),
+            QStringLiteral("Drag inward: Concave cap"), QStringLiteral("Double-click: Flat cap")});
+        update();
+        return;
+    }
     const auto widthHit = liningWidthHandleAtScreen(screenPoint);
-    if (widthHit.valid() || (lining_.dragPoint >= 0 && lining_.dragHandle != 0)) {
+    if (widthHit.valid() || (lining_.dragPoint >= 0 && std::abs(lining_.dragHandle) == 2)) {
         lining_.hoverPoint = lining_.dragPoint >= 0 ? lining_.dragPoint : widthHit.pointIndex;
         lining_.hoverHandle = lining_.dragPoint >= 0 ? lining_.dragHandle : widthHit.handle;
         setCursorHint(screenPoint, {

@@ -51,6 +51,7 @@ MainWindow::MainWindow(QWidget *parent)
 #endif
     setupOptionsMenu();
     setupToolbar();
+    setupToolSettings();
     setupWindowMenu();
 
     defaultLayoutState_ = saveState();

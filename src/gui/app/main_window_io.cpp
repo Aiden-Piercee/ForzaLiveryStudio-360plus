@@ -1417,15 +1417,19 @@ bool MainWindow::restoreLayout() {
         return false;
     }
     const QByteArray geometry = settings.value(QStringLiteral("layout/geometry")).toByteArray();
+    const bool restored = restoreState(state);
+    positionToolSettings();
     if (!geometry.isEmpty()) {
         restoreGeometry(geometry);
     }
-    return restoreState(state);
+
+    return restored;
 }
 
 void MainWindow::resetLayout() {
     if (!defaultLayoutState_.isEmpty()) {
         restoreState(defaultLayoutState_);
+        positionToolSettings();
         syncDockCollapseButtons();
     }
     QSettings settings;

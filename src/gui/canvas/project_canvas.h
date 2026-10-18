@@ -11,6 +11,7 @@
 #include "gui/key_bindings.h"
 #include "native_shape_renderer.h"
 #include "path_interaction.h"
+#include "theme_manager.h"
 #include "pen_fill.h"
 #include "region_extract.h"
 #include "region_fill.h"
@@ -60,6 +61,9 @@ public:
     void setCanvasColor(const QColor &color);
     QColor canvasColor() const;
     void setTransformRelativeMode(bool relative);
+    void setBucketTolerance(int tolerance);
+    int bucketTolerance() const;
+    void setBucketToleranceChangedCallback(std::function<void(int)> callback);
     void setMoveToolAutoSelect(bool enabled);
     bool moveToolAutoSelect() const;
     void setPipetteAutoReturn(bool enabled);
@@ -179,7 +183,6 @@ private:
     static constexpr double kMinimumLiningWidth = 0.1;
     static constexpr double kMaximumLiningWidth = 256.0;
     static constexpr double kLiningWidthHandleOffsetPixels = 12.0;
-    static constexpr int kDefaultBucketTolerance = 16;
     static constexpr QSize kDefaultVisibilityBorderResolution{1920, 1080};
     inline static const QColor kDefaultGuidelineColor{0, 170, 255};
 
@@ -537,6 +540,8 @@ private:
     void requestLiningFill();
     void drawLiningOverlay(QPainter &painter);
     QPainterPath liningPreviewPath() const;
+    QPointF liningCapHandlePosition(int pointIndex) const;
+    PenPointHit liningCapHandleAtScreen(const QPointF &screenPoint) const;
     QPointF liningWidthNormal(int pointIndex) const;
     QPointF liningWidthHandlePosition(int pointIndex, int side) const;
     PenPointHit liningWidthHandleAtScreen(const QPointF &screenPoint) const;
@@ -588,6 +593,7 @@ private:
     std::function<void(const QVector<PenPoint> &, double, const std::optional<QColor> &)> liningFillRequestedCallback_;
     std::function<void()> liningFillCancelCallback_;
     std::function<void(double)> liningWidthChangedCallback_;
+    std::function<void(int)> bucketToleranceChangedCallback_;
     PathInteraction pen_;
     QString pathFigureId_;
     std::optional<PathInteractionState> penDraft_;

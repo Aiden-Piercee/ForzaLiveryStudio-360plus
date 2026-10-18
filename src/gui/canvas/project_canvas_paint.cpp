@@ -259,7 +259,7 @@ void ProjectCanvas::drawLiningOverlay(QPainter &painter) {
     auto previewPoints = lining_.points;
     if (!lining_.closed)
         previewPoints.push_back({lining_.hoverWorld, PenPointKind::Hard, {}, {}, false, lining_.strokeWidth});
-    const QPainterPath ribbon = buildLiningRibbon(buildLiningStroke(previewPoints, lining_.strokeWidth));
+    const QPainterPath ribbon = buildLiningRibbon(previewPoints, lining_.strokeWidth);
     const QPainterPath screenRibbon = camera_.matrix().map(ribbon);
     const QPainterPath screenCenterline = camera_.matrix().map(centerline);
     painter.setPen(Qt::NoPen);
@@ -299,6 +299,17 @@ void ProjectCanvas::drawLiningOverlay(QPainter &painter) {
                              ? QColor(232, 72, 72)
                              : QColor(238, 240, 244));
         painter.drawEllipse(screen, radius, radius);
+    }
+    if (lining_.closed && lining_.points.size() >= 2) {
+        for (int index : {0, static_cast<int>(lining_.points.size()) - 1}) {
+            const QPointF handle = liningCapHandlePosition(index);
+            painter.setPen(QPen(QColor(230, 175, 70), 1.0));
+            painter.drawLine(worldToScreen(lining_.points[index].position), handle);
+            painter.setBrush(lining_.hoverPoint == index && lining_.hoverHandle == 3
+                ? QColor(255, 230, 160) : QColor(230, 175, 70));
+            constexpr double kCapHandleRadius = 4.5;
+            painter.drawEllipse(handle, kCapHandleRadius, kCapHandleRadius);
+        }
     }
     if (lining_.closed && lining_.hoverPoint < 0 && lining_.hoverCurve.valid()) {
         painter.setPen(QPen(QColor(18, 20, 24), 2.0));

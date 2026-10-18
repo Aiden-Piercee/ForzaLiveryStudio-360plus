@@ -369,12 +369,6 @@ SettingsDialog::SettingsDialog(UiTheme theme,
         backgroundModeIndex(previewBackgroundSettings_.layers.mode));
 
     SettingsPage toolsPage = createSettingsPage(pages);
-    displayAnchorsDuringTransformDrag_ = new QCheckBox(toolsPage.widget);
-    displayAnchorsDuringTransformDrag_->setChecked(
-        behaviorSettings_.displayAnchorsDuringTransformDrag);
-    addSettingRow(toolsPage, QStringLiteral("tools.display_anchors"),
-                  QStringLiteral("Display anchors during transform drag"),
-                  displayAnchorsDuringTransformDrag_, tips);
     const auto makeNudgeSpinBox = [toolsPage](double value) {
         auto *spin = new QDoubleSpinBox(toolsPage.widget);
         spin->setDecimals(3);
@@ -399,14 +393,6 @@ SettingsDialog::SettingsDialog(UiTheme theme,
     separateSelectAndMarqueeToolsCheck_->setChecked(behaviorSettings_.separateSelectAndMarqueeTools);
     addSettingRow(toolsPage, QStringLiteral("tools.separate_select_marquee"),
                   QStringLiteral("Separate Select and Marquee tools"), separateSelectAndMarqueeToolsCheck_, tips);
-    selectShapesByBoundingBoxCheck_ = new QCheckBox(toolsPage.widget);
-    selectShapesByBoundingBoxCheck_->setChecked(behaviorSettings_.selectShapesByBoundingBox);
-    addSettingRow(toolsPage, QStringLiteral("tools.select_bounding_box"),
-                  QStringLiteral("Select shapes by bounding box"), selectShapesByBoundingBoxCheck_, tips);
-    showSelectedShapeOutlinesCheck_ = new QCheckBox(toolsPage.widget);
-    showSelectedShapeOutlinesCheck_->setChecked(behaviorSettings_.showSelectedShapeOutlines);
-    addSettingRow(toolsPage, QStringLiteral("tools.selected_outlines"),
-                  QStringLiteral("Show selected-shape outlines"), showSelectedShapeOutlinesCheck_, tips);
     separateOpacityAndSkewToolsCheck_ = new QCheckBox(toolsPage.widget);
     separateOpacityAndSkewToolsCheck_->setChecked(
         behaviorSettings_.separateOpacityAndSkewTools);
@@ -609,7 +595,6 @@ BehaviorSettings SettingsDialog::selectedBehaviorSettings() const {
     const QSize resolution = visibilityBorderResolution_->currentData().toSize();
 
     result.visibilityBordersEnabled = visibilityBordersCheck_->isChecked();
-    result.displayAnchorsDuringTransformDrag = displayAnchorsDuringTransformDrag_->isChecked();
     result.generatePreviewsWithTransformations = generatePreviewsWithTransformations_->isChecked();
     result.visibilityBorderResolution = resolution.isValid()
         ? resolution : defaults.visibilityBorderResolution;
@@ -621,8 +606,6 @@ BehaviorSettings SettingsDialog::selectedBehaviorSettings() const {
     result.pasteInPlace = pasteInPlace_->isChecked();
     result.verticalToolbar = toolbarViewCombo_->currentData().toBool();
     result.separateSelectAndMarqueeTools = separateSelectAndMarqueeToolsCheck_->isChecked();
-    result.selectShapesByBoundingBox = selectShapesByBoundingBoxCheck_->isChecked();
-    result.showSelectedShapeOutlines = showSelectedShapeOutlinesCheck_->isChecked();
     result.separateOpacityAndSkewTools = separateOpacityAndSkewToolsCheck_->isChecked();
     result.gameFolder = gameFolder_->text().trimmed();
     result.discardModelOnLiveryOpen = discardModelOnLiveryOpen_->isChecked();

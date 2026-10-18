@@ -635,7 +635,7 @@ QVector<LiningStrokeSegment> buildLiningStroke(const QVector<PenPoint> &points, 
     return result;
 }
 
-QPainterPath buildLiningRibbon(const QVector<LiningStrokeSegment> &segments, double widthRatio) {
+QPainterPath buildLiningRibbon(const QVector<LiningStrokeSegment> &segments, double widthRatio, bool flatEnds) {
     constexpr double kRibbonStepWidthFraction = 0.1;
     constexpr int kRibbonMinimumSamples = 8;
     constexpr int kRibbonMaximumSamples = 4096;
@@ -653,7 +653,14 @@ QPainterPath buildLiningRibbon(const QVector<LiningStrokeSegment> &segments, dou
         for (const auto &segment : segments)
             segment.centerline.appendTo(centerline);
 
-        return buildLiningRibbon(centerline, uniformWidth * widthRatio);
+        if (!flatEnds) return buildLiningRibbon(centerline, uniformWidth * widthRatio);
+        QPainterPathStroker stroker;
+        stroker.setWidth(uniformWidth * widthRatio);
+        stroker.setCurveThreshold(kLiningCurveThreshold);
+        stroker.setCapStyle(Qt::FlatCap);
+        stroker.setJoinStyle(Qt::RoundJoin);
+
+        return stroker.createStroke(centerline);
     }
     for (const auto &segment : segments) {
         QPolygonF left;
@@ -684,6 +691,8 @@ QPainterPath buildLiningRibbon(const QVector<LiningStrokeSegment> &segments, dou
         result.addPolygon(outline);
         result.closeSubpath();
         for (const auto &cap : {std::pair{curve.start, segment.startWidth}, std::pair{curve.end, segment.endWidth}}) {
+            if (flatEnds && ((&segment == &segments.front() && cap.first == curve.start)
+                || (&segment == &segments.back() && cap.first == curve.end))) continue;
             const double radius = cap.second * widthRatio * 0.5;
             result.addEllipse(cap.first, radius, radius);
         }
@@ -716,6 +725,46 @@ QPainterPath buildLiningRibbon(const QPainterPath &centerline, double width) {
     stroker.setCapStyle(Qt::RoundCap);
     stroker.setJoinStyle(Qt::RoundJoin);
     return stroker.createStroke(centerline);
+}
+
+QPointF liningEndpointDirection(const QVector<PenPoint> &points, int pointIndex) {
+    const auto segments = penSegments(points, false);
+    if (segments.isEmpty()) return {};
+    const bool first = pointIndex == 0;
+    const auto &segment = first ? segments.front() : segments.back();
+    QPointF direction = segment.derivative(first ? 0.0 : 1.0);
+    if (QLineF({}, direction).length() <= kEpsilon) direction = segment.end - segment.start;
+    const double length = QLineF({}, direction).length();
+
+    return length > kEpsilon ? direction * ((first ? -1.0 : 1.0) / length) : QPointF();
+}
+
+QPainterPath buildLiningRibbon(const QVector<PenPoint> &points, double width) {
+    if (points.size() < 2) return {};
+    const auto stroke = buildLiningStroke(points, width);
+    if (points.front().endCap == 1.0 && points.back().endCap == 1.0) return buildLiningRibbon(stroke);
+    QPainterPath ribbon = buildLiningRibbon(stroke, 1.0, true);
+    constexpr double kQuarterCircleControl = 0.5522847498307936;
+    for (int index : {0, static_cast<int>(points.size()) - 1}) {
+        const auto &point = points[index];
+        const double radius = liningPointWidth(point, width) * 0.5;
+        const QPointF outward = liningEndpointDirection(points, index);
+        const QPointF normal(-outward.y(), outward.x());
+        const QPointF position = point.position;
+        if (point.endCap == 0.0) continue;
+        const double depth = std::abs(point.endCap) * radius;
+        const QPointF direction = point.endCap > 0.0 ? outward : -outward;
+        const QPointF start = position + normal * radius;
+        const QPointF tip = position + direction * depth;
+        const QPointF end = position - normal * radius;
+        QPainterPath cap(start);
+        cap.cubicTo(start + direction * (depth * kQuarterCircleControl), tip + normal * (radius * kQuarterCircleControl), tip);
+        cap.cubicTo(tip - normal * (radius * kQuarterCircleControl), end + direction * (depth * kQuarterCircleControl), end);
+        cap.closeSubpath();
+        ribbon = point.endCap > 0.0 ? ribbon.united(cap) : ribbon.subtracted(cap);
+    }
+
+    return ribbon.simplified();
 }
 
 QVector<PenPrimitive> buildLiningPrimitiveCatalog(const ShapeGeometryStore &geometry) {

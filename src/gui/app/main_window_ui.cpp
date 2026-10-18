@@ -20,7 +20,6 @@
 #include <algorithm>
 #include <array>
 #include <optional>
-#include <tuple>
 
 namespace gui {
 
@@ -31,6 +30,8 @@ void MainWindow::setupCanvas() {
     canvas_->setEditorState(state_);
     canvas_->setPathProjectRequestedCallback([this]() { return ensureProjectForInsertion(); });
     canvas_->setTransformRelativeMode(loadTransformModeSettings().relativeMode);
+    canvas_->setLiningWidth(loadBehaviorSettings().liningWidth);
+    canvas_->setBucketTolerance(loadBehaviorSettings().bucketTolerance);
     QString geometryError;
     if (!canvas_->loadGeometry(&geometryError)) {
         statusBar()->showMessage(geometryError);
@@ -565,36 +566,7 @@ void MainWindow::setupOptionsMenu() {
     };
     addBehaviorOption(optionsMenu, QStringLiteral("Use Last Selected Color for New Shapes"), QStringLiteral("toggle_insert_last_color"), &BehaviorSettings::insertShapeWithLastSelectedColor);
     addBehaviorOption(optionsMenu, QStringLiteral("Use Last Selected Shape Scale for New Shapes"), QStringLiteral("toggle_insert_last_scale"), &BehaviorSettings::insertShapeWithLastSelectedScale);
-    QMenu *contourFillMenu = optionsMenu->addMenu(QStringLiteral("Contour Fill"));
-    auto *contourFillActions = new QActionGroup(contourFillMenu);
-    const std::array<std::tuple<ContourFillMode, QString, QString>, 2> fillModes = {{
-        {ContourFillMode::Analytic, QStringLiteral("Analytic"), QStringLiteral("select_analytic_contour_fill")},
-        {ContourFillMode::CompactFit, QStringLiteral("Compact Fit (experimental)"), QStringLiteral("select_compact_contour_fill")},
-    }};
-    for (const auto &[mode, label, shortcut] : fillModes) {
-        QAction *action = contourFillMenu->addAction(label);
-        action->setCheckable(true);
-        action->setChecked(loadBehaviorSettings().contourFillMode == mode);
-        contourFillActions->addAction(action);
-        registerShortcutAction(action, shortcut, QStringLiteral("Contour Fill: %1").arg(label));
-        addAction(action);
-        connect(action, &QAction::triggered, this, [this, mode]() {
-            BehaviorSettings settings = loadBehaviorSettings();
-            settings.contourFillMode = mode;
-            applyBehaviorSettings(settings);
-        });
-        connect(contourFillMenu, &QMenu::aboutToShow, action, [action, mode]() {
-            action->setChecked(loadBehaviorSettings().contourFillMode == mode);
-        });
-    }
-    addBehaviorOption(optionsMenu, QStringLiteral("Automatically Save Pen and Lining Paths"),
-                      QStringLiteral("toggle_auto_save_paths"), &BehaviorSettings::autoSavePaths);
     addBehaviorOption(optionsMenu, QStringLiteral("Show Property Debug"), QStringLiteral("toggle_property_debug"), &BehaviorSettings::showPropertyDebug);
-    addBehaviorOption(optionsMenu, QStringLiteral("Move Tool Auto-Select"), QStringLiteral("toggle_move_auto_select"), &BehaviorSettings::moveToolAutoSelect);
-    addBehaviorOption(optionsMenu, QStringLiteral("Pipette Auto-Return"),
-                      QStringLiteral("toggle_pipette_auto_return"),
-                      &BehaviorSettings::pipetteAutoReturn);
-    addBehaviorOption(optionsMenu, QStringLiteral("Show Selection Flash"), QStringLiteral("toggle_selection_flash"), &BehaviorSettings::selectionFlashEnabled);
 
     QMenu *guidesMenu = optionsMenu->addMenu(QStringLiteral("&Guides"));
     addBehaviorOption(guidesMenu, QStringLiteral("Show Guidelines"), QStringLiteral("show_guidelines"),
@@ -615,22 +587,6 @@ void MainWindow::setupOptionsMenu() {
                       &BehaviorSettings::guideLayersVisible);
     addBehaviorOption(guidesMenu, QStringLiteral("Show Guide Layers On Top"), QStringLiteral("toggle_guide_layers_on_top"),
                       &BehaviorSettings::guideLayersOnTop);
-
-    QAction *transformRelativeOption = optionsMenu->addAction(QStringLiteral("Transform Relative Mode"));
-    transformRelativeOption->setCheckable(true);
-    const TransformModeSettings initialTransformSettings = loadTransformModeSettings();
-    transformRelativeOption->setChecked(initialTransformSettings.relativeMode);
-    registerShortcutAction(transformRelativeOption, QStringLiteral("toggle_transform_relative"),
-                           QStringLiteral("Transform Relative Mode"));
-    addAction(transformRelativeOption);
-    auto applyTransformRelativeOption = [this](bool checked) {
-        TransformModeSettings settings = loadTransformModeSettings();
-        settings.relativeMode = checked;
-        saveTransformModeSettings(settings);
-        canvas_->setTransformRelativeMode(checked);
-    };
-    connect(transformRelativeOption, &QAction::toggled, this, applyTransformRelativeOption);
-    canvas_->setTransformRelativeMode(initialTransformSettings.relativeMode);
 
     carUnwrapAction_ = optionsMenu->addAction(QStringLiteral("Show Car UV Unwrap"));
     carUnwrapAction_->setCheckable(true);
@@ -694,39 +650,6 @@ void MainWindow::setupToolbar() {
     toolGroup->addAction(addTool(QStringLiteral("Pipette"), QStringLiteral("pipette"), QStringLiteral("ToolPipette.xpm")));
     toolGroup->addAction(addTool(QStringLiteral("Pen"), QStringLiteral("pen"), QStringLiteral("ToolbarPen.xpm")));
     toolGroup->addAction(addTool(QStringLiteral("Lining"), QStringLiteral("lining"), QStringLiteral("ToolLining.xpm")));
-    liningWidthLabel_ = new QLabel(QStringLiteral("Width"), toolBar_);
-    liningWidthSpin_ = new QDoubleSpinBox(toolBar_);
-    liningWidthSpin_->setRange(0.1, 256.0);
-    liningWidthSpin_->setDecimals(2);
-    liningWidthSpin_->setSingleStep(0.5);
-    liningWidthSpin_->setValue(canvas_->liningWidth());
-    liningWidthSpin_->setSuffix(QStringLiteral(" units"));
-    liningWidthSpin_->setToolTip(QStringLiteral("Stroke width for all anchors. Drag the blue width handles to adjust individual anchors."));
-    liningWidthLabel_->setVisible(false);
-    liningWidthSpin_->setVisible(false);
-    toolBar_->addWidget(liningWidthLabel_);
-    toolBar_->addWidget(liningWidthSpin_);
-    connect(liningWidthSpin_, &QDoubleSpinBox::valueChanged,
-            canvas_, &ProjectCanvas::setLiningWidth);
-    canvas_->setLiningWidthChangedCallback([this](double width) {
-        if (liningWidthSpin_ == nullptr) {
-            return;
-        }
-        const QSignalBlocker blocker(liningWidthSpin_);
-        liningWidthSpin_->setValue(width);
-    });
-    liningMarginLabel_ = new QLabel(QStringLiteral("Outside margin"), toolBar_);
-    liningMarginSpin_ = new QDoubleSpinBox(toolBar_);
-    liningMarginSpin_->setRange(0.0, 200.0);
-    liningMarginSpin_->setDecimals(0);
-    liningMarginSpin_->setSingleStep(5.0);
-    liningMarginSpin_->setValue(thin::kDefaultLiningOutsideMarginWidthFraction * 100.0);
-    liningMarginSpin_->setSuffix(QStringLiteral("%"));
-    liningMarginSpin_->setToolTip(QStringLiteral("Extra space allowed beyond each stroke edge, as a percentage of local width. Width remains the fitting target."));
-    liningMarginLabel_->setVisible(false);
-    liningMarginSpin_->setVisible(false);
-    toolBar_->addWidget(liningMarginLabel_);
-    toolBar_->addWidget(liningMarginSpin_);
     toolGroup->addAction(addTool(QStringLiteral("Bucket"), QStringLiteral("bucket"), QStringLiteral("ToolBucket.xpm")));
     selectTool->setChecked(true);
     toolBar_->addSeparator();
@@ -750,22 +673,9 @@ void MainWindow::applyToolbarStyle(bool vertical) {
     toolBar_->setAllowedAreas(targetArea);
     if (toolBarArea(toolBar_) != targetArea) {
         addToolBar(targetArea, toolBar_);
+        positionToolSettings();
     }
     toolBar_->setToolButtonStyle(vertical ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);
-    const bool lining = canvas_ != nullptr && canvas_->tool() == QStringLiteral("lining");
-    if (liningWidthLabel_ != nullptr) {
-        liningWidthLabel_->setVisible(lining && !vertical);
-    }
-    if (liningWidthSpin_ != nullptr) {
-        liningWidthSpin_->setVisible(lining);
-        liningWidthSpin_->setMaximumWidth(vertical ? kToolbarIconExtent * 2 : QWIDGETSIZE_MAX);
-    }
-    if (liningMarginLabel_ != nullptr)
-        liningMarginLabel_->setVisible(lining && !vertical);
-    if (liningMarginSpin_ != nullptr) {
-        liningMarginSpin_->setVisible(lining);
-        liningMarginSpin_->setMaximumWidth(vertical ? kToolbarIconExtent * 2 : QWIDGETSIZE_MAX);
-    }
 }
 
 void MainWindow::importCarModel() {
@@ -1047,6 +957,7 @@ void MainWindow::applyBehaviorSettings(const BehaviorSettings &settings, bool sa
             saveLayout();
         }
     }
+    refreshToolSettings();
 }
 
 void MainWindow::configureAutosaveTimer(const BehaviorSettings &settings) {
@@ -1269,6 +1180,7 @@ void MainWindow::toggleDockAreaCollapsed(Qt::DockWidgetArea area, QDockWidget *a
             control.collapsed = false;
             if (!control.layoutState.isEmpty()) {
                 restoreState(control.layoutState);
+                positionToolSettings();
             }
             for (QDockWidget *dock : control.hiddenDocks) {
                 if (dock != nullptr) {

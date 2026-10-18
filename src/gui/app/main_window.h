@@ -47,6 +47,7 @@ class HeaderMetadataWidget;
 class LiverySectionBar;
 class PropertyPanel;
 class ShapesBrowserWidget;
+class ToolSettingsWidget;
 
 class MainWindow final : public QMainWindow {
 public:
@@ -236,6 +237,11 @@ private:
     void setupImgGenMenu();
     void setupOptionsMenu();
     void setupToolbar();
+    void setupToolSettings();
+    void setupToolOptionShortcuts();
+    void positionToolSettings();
+    void refreshToolSettings();
+    void setToolOption(const QString &key, const QVariant &value);
     void applyToolbarStyle(bool vertical);
     void setupWindowMenu();
     void importCarModel();
@@ -256,11 +262,9 @@ private:
     LiverySectionBar *sectionBar_ = nullptr;
     QSplitter *layersSplitter_ = nullptr;
     QLabel *details_ = nullptr;
-    QLabel *liningWidthLabel_ = nullptr;
-    QDoubleSpinBox *liningWidthSpin_ = nullptr;
-    QLabel *liningMarginLabel_ = nullptr;
-    QDoubleSpinBox *liningMarginSpin_ = nullptr;
     QToolBar *toolBar_ = nullptr;
+    QToolBar *toolSettingsBar_ = nullptr;
+    ToolSettingsWidget *toolSettings_ = nullptr;
     QAction *marqueeToolAction_ = nullptr;
     QAction *skewToolAction_ = nullptr;
     QAction *opacityToolAction_ = nullptr;

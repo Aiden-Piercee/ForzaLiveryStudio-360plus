@@ -31,9 +31,11 @@ struct LiningStrokeSegment {
 
 double liningPointWidth(const PenPoint &point, double defaultWidth);
 QVector<LiningStrokeSegment> buildLiningStroke(const QVector<PenPoint> &points, double defaultWidth);
-QPainterPath buildLiningRibbon(const QVector<LiningStrokeSegment> &segments, double widthRatio = 1.0);
+QPainterPath buildLiningRibbon(const QVector<LiningStrokeSegment> &segments, double widthRatio = 1.0, bool flatEnds = false);
 LiningPath buildLiningPath(const QVector<PenPoint> &points);
 QPainterPath buildLiningRibbon(const QPainterPath &centerline, double width);
+QPainterPath buildLiningRibbon(const QVector<PenPoint> &points, double width);
+QPointF liningEndpointDirection(const QVector<PenPoint> &points, int pointIndex);
 QVector<PenPrimitive> buildLiningPrimitiveCatalog(const ShapeGeometryStore &geometry);
 PenFillResult fillLiningPath(const LiningFillRequest &request,
                              const std::function<bool()> &cancelled = {});

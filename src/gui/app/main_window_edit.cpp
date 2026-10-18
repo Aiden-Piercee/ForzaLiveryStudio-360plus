@@ -12,6 +12,8 @@
 #include "layer_tree_view.h"
 #include "perf_utils.h"
 #include "property_panel.h"
+#include "cubic_contour.h"
+#include "tool_settings_widget.h"
 #include "shape_registry.h"
 #include "shapes_browser_widget.h"
 #include "matrix_math.h"
@@ -339,8 +341,7 @@ void MainWindow::startLiningFill(const QVector<PenPoint> &points,
     statusBar()->showMessage(QStringLiteral("Tracing lining path… Press %1 to cancel")
                                  .arg(interactionShortcutText(KeyInteraction::CanvasCancelInteraction)));
 
-    const double outsideMargin = liningMarginSpin_ != nullptr
-        ? liningMarginSpin_->value() / 100.0 : thin::kDefaultLiningOutsideMarginWidthFraction;
+    const double outsideMargin = loadBehaviorSettings().liningOutsideMargin;
     startGeneratedFillTask([points, width, primitives, outsideMargin](
                                const std::function<bool()> &cancelled,
                                const GeneratedFillProgress &progress) {
@@ -1508,18 +1509,10 @@ void MainWindow::setToolName(const QString &name) {
             action->setChecked(toolName.toString() == name);
         }
     }
-    const bool lining = name == QStringLiteral("lining");
-    const bool verticalToolbar = toolBar_ != nullptr && toolBar_->orientation() == Qt::Vertical;
-    if (liningWidthLabel_ != nullptr) {
-        liningWidthLabel_->setVisible(lining && !verticalToolbar);
+    if (toolSettings_ != nullptr) {
+        toolSettings_->setTool(name);
+        refreshToolSettings();
     }
-    if (liningWidthSpin_ != nullptr) {
-        liningWidthSpin_->setVisible(lining);
-    }
-    if (liningMarginLabel_ != nullptr)
-        liningMarginLabel_->setVisible(lining && !verticalToolbar);
-    if (liningMarginSpin_ != nullptr)
-        liningMarginSpin_->setVisible(lining);
     statusBar()->showMessage(QStringLiteral("Tool: %1").arg(name), 1500);
 }
 

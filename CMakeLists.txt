@@ -215,6 +215,7 @@ qt_add_library(fls_editor_ui STATIC
     src/gui/app/main_window_io.cpp
     src/gui/app/main_window_project.cpp
     src/gui/app/main_window_ui.cpp
+    src/gui/app/main_window_tools.cpp
     src/gui/app/perf_utils.h
     src/gui/app/settings_dialog.cpp
     src/gui/app/settings_dialog.h
@@ -319,6 +320,8 @@ qt_add_library(fls_editor_ui STATIC
     src/gui/widgets/layer_tree_view.h
     src/gui/widgets/livery_section_bar.cpp
     src/gui/widgets/livery_section_bar.h
+    src/gui/widgets/tool_settings_widget.cpp
+    src/gui/widgets/tool_settings_widget.h
     src/gui/widgets/property_panel.cpp
     src/gui/widgets/property_panel.h
     src/gui/widgets/shape_geometry_store.cpp
@@ -464,7 +467,7 @@ if(FLS_BUILD_TESTS)
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/deploy_gui_assets_test.cmake")
     add_executable(fls_behavior_settings_tests tools/behavior_settings_test.cpp src/gui/app/theme_manager.cpp)
     target_include_directories(fls_behavior_settings_tests PRIVATE src/gui/app)
-    target_link_libraries(fls_behavior_settings_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+    target_link_libraries(fls_behavior_settings_tests PRIVATE fls_core Qt6::Core Qt6::Gui Qt6::Widgets)
     add_test(NAME behavior_settings COMMAND fls_behavior_settings_tests)
     add_executable(fls_selection_geometry_tests tools/selection_geometry_test.cpp src/gui/canvas/selection_geometry.cpp)
     target_include_directories(fls_selection_geometry_tests PRIVATE src/gui/canvas src/gui/widgets)
@@ -481,6 +484,10 @@ if(FLS_BUILD_TESTS)
     endif()
     add_test(NAME gui_commands COMMAND fls_gui_command_tests)
     set_tests_properties(gui_commands PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_executable(fls_gui_startup_tests tools/gui_startup_test.cpp)
+    target_link_libraries(fls_gui_startup_tests PRIVATE fls_editor_ui)
+    add_test(NAME gui_startup COMMAND fls_gui_startup_tests)
+    set_tests_properties(gui_startup PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     add_executable(fls_editor_selection_tests
         ${fls_editor_state_moc}
         tools/editor_selection_test.cpp

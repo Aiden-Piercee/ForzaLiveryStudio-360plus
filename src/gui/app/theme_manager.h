@@ -1,5 +1,7 @@
 #pragma once
 
+#include "contour_data.h"
+
 #include <QColor>
 #include <QBrush>
 #include <QPalette>
@@ -36,11 +38,18 @@ enum class ContourFillMode {
     CompactFit,
 };
 
+inline constexpr int kDefaultBucketTolerance = 16;
+inline constexpr double kDefaultLiningOutsideMargin = 0.5;
+
 struct BehaviorSettings {
     bool insertShapeWithLastSelectedColor = true;
     bool insertShapeWithLastSelectedScale = false;
     ContourFillMode contourFillMode = ContourFillMode::Analytic;
-    bool autoSavePaths = false;
+    bool autoSavePenPaths = false;
+    bool autoSaveLiningPaths = false;
+    int bucketTolerance = kDefaultBucketTolerance;
+    double liningWidth = fls::scene::kDefaultLiningWidth;
+    double liningOutsideMargin = kDefaultLiningOutsideMargin;
     bool showPropertyDebug = false;
     bool moveToolAutoSelect = false;
     bool pipetteAutoReturn = true;

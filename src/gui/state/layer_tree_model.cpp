@@ -440,6 +440,7 @@ quint64 contentSignature(const fls::scene::Layer &node, QHash<QString, quint64> 
                 seed = mixHash(seed, static_cast<quint64>(point.kind));
                 seed = mixHash(seed, point.explicitHandles);
                 seed = mixHash(seed, hashDouble(point.strokeWidth));
+                seed = mixHash(seed, hashDouble(point.endCap));
             }
         };
 

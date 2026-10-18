@@ -33,27 +33,27 @@ exports grouped `C_group` folders and `C_livery` folders.
   default. **Settings → Tools → Separate Select and Marquee tools** restores the
   separate tools. Picking follows each shape's body, including holes and raster
   transparency; marquees select shapes whose bodies intersect the rectangle.
-  **Select shapes by bounding box** enables rectangular picking instead. Hover
-  outlines follow the silhouette in the selection tools. **Show selected-shape
-  outlines** is on by default and keeps selected silhouettes visible across tools.
+  **Tool Settings → Pick by bounding box** enables rectangular picking instead.
+  Hover outlines follow the silhouette in the selection tools. **Selected outlines**
+  is on by default and keeps selected silhouettes visible across tools.
   Shift-click selects a shape's immediate group. Further Shift-clicks within the
   selected group climb one parent at a time and stop at the outermost group.
-  Rapid clicks follow the same sequence. Move with **Options → Move Tool Auto-Select** enabled
+  Rapid clicks follow the same sequence. Move with **Tool Settings → Auto Select** enabled
   uses the same click selection and hover outlines, and shows the Select cursor
   when the selection is empty. The current selection takes priority within its
   bounding box for clicks and drag starts. Outside the box, shapes and groups can
   be selected and empty space clears the selection. With auto-select
   disabled, Move can drag the current selection from anywhere on the canvas.
   Pipette can return to the previously used tool after a successful
-  pick through a persistent, default-on Options toggle.
+  pick through **Tool Settings → Auto Return**, enabled by default.
   Pen builds a closed hard/soft cubic compound contour with editable interior cutouts.
   **Edit → Save Pen or Lining Path as Figure** stores the active path as a layer
   in the project. Figures retain their tool type, anchors, handles, cutouts,
   widths and fill color. Selecting a figure in **Layers** activates its tool;
   edits participate in project undo. **Properties → Color** changes its outline
   and the color used for generated shapes. Outlines have a contrasting black or
-  white stroke. **Options → Automatically Save Pen and Lining Paths** saves each
-  path before filling and is off by default. New Lining paths use black.
+  white stroke. Each tool's **Tool Settings → Save Path** saves its path on
+  completion and is off by default. New Lining paths use black.
   **Edit ? New Pen Contour** starts a fresh contour. Saved figures support Copy,
   Paste, Stamp, grouping and canvas transforms. They show an outline in the editor
   and are excluded from game exports and native shape counts. Saving a `.3so`
@@ -63,7 +63,7 @@ exports grouped `C_group` folders and `C_livery` folders.
   The polygonal core uses deterministic ear clipping and compatible Square merging.
   Placements are emitted from the boundary inward under a `2 * point count` shape
   cap, and the result is an ordinary single-colour scene group.
-  **Options → Contour Fill** selects **Analytic** or **Compact Fit** and preserves
+  Pen's **Tool Settings → Mode** selects **Analytical** or **Compact** and preserves
   the selected mode between launches. Analytic is the default. Saved Thin Regions
   preferences load as Compact Fit; removed fill modes use Analytic.
   Raster Bucket tracing fits curve runs between hard anchors. It first attempts
@@ -404,9 +404,15 @@ exports grouped `C_group` folders and `C_livery` folders.
   and the profile backend's setup, transfer, numeric, and
   geometry-validation timings.
   **Lining** fits an editable open hard/soft centreline with native shapes.
+  Lining (Experimental) is the default fitting mode; Analytical and Compact fill
+  the same stroke outline through their contour engines. Finished paths expose
+  an amber handle at each endpoint. Dragging outward makes the cap convex;
+  dragging inward makes it concave. Double-clicking or right-clicking resets
+  the cap to flat. Cap values persist with the path and participate in undo/redo.
+  Preview and fitting use the same cap geometry.
   Each anchor has two blue width handles. Dragging a handle or scrolling over
-  it changes that anchor's width; right-clicking it restores the toolbar width.
-  The toolbar width sets all anchors to a uniform value. Width edits use the
+  it changes that anchor's width; right-clicking it restores the Tool Settings width.
+  The Tool Settings width sets all anchors to a uniform value. Width edits use the
   path's undo history. Width varies linearly in each cubic segment's parameter,
   and the preview uses the same width profile as fitting. New anchors retain
   their local width. Continuity and curve accuracy take priority over shape
@@ -561,6 +567,20 @@ exports grouped `C_group` folders and `C_livery` folders.
   normal and Shift step sizes are configurable in Settings.
 - Read world coordinates from pan/zoom-aware canvas rulers and manage persistent
   horizontal and vertical guidelines from their ruler markers.
+- Change frequent tool options in **Tool Settings**, a compact row across the full
+  window below the horizontal toolbar and above the canvas and side panels.
+  The row keeps its dimensions across tools. Controls stay aligned to the left
+  and scroll horizontally when needed. Finishing an edit returns focus to the canvas.
+  They follow the active tool. Bucket exposes a tolerance slider and
+  editable field synchronized with canvas scrolling. Bucket fits cubic curves.
+  Move exposes Auto Select, Select exposes Selection Flash,
+  rectangular picking and selected outlines, Transform exposes Relative Transform
+  and drag handles, and Pipette exposes Auto Return. Pen exposes Analytical and
+  Compact fill modes and Save Path. Lining uses its dedicated experimental fitter
+  and exposes width, outside margin, and its own Save Path.
+  Numeric controls support typing, sliders, and wheel adjustments. These controls
+  live in Tool Settings and retain their values between launches. Keyboard shortcuts
+  for these options remain available.
 - Edit layer properties: name, shape ID, position, scale, rotation, skew,
   opacity, color, visibility, mask, and lock state. Direct numeric input accepts
   arithmetic expressions with parentheses and `+`, `-`, `*`, `/`, and `%`.
@@ -1114,7 +1134,8 @@ The codebase is designed to build on both Windows (via vcpkg) and Linux (via sys
     Layers edits and selection, and Edit actions submit state commands.
     `tools/gui_command_test.cpp` exercises the production widgets through Qt
     events and checks command delivery, history, tree integrity, world transforms,
-    and export round trips. Selection, clipboard/duplicate/insert,
+    and export round trips. `tools/gui_startup_test.cpp` exercises startup with
+    hidden windows, both themes, and saved layouts. Selection, clipboard/duplicate/insert,
     group/ungroup/reorder, and undo/redo snapshots in the per-concern units;
     the layer/group/guide tree model; and shared scene transform/local-rect
     helpers plus the bounds accumulator.
@@ -1183,7 +1204,8 @@ The codebase is designed to build on both Windows (via vcpkg) and Linux (via sys
     and shared material tuning. Decoded
     material defaults and native textures are held in bounded process-wide caches.
   - Dockable panels and their support: property editing (single/multi/group/
-    guide, live color, numeric-label dragging, mixed values); the tree view with
+    guide, live color, numeric-label dragging, mixed values); contextual tool
+    controls in `tool_settings_widget.*`; the tree view with
     drag/drop reordering and reparenting, row badges, and thumbnails; the
     project-specific swatches panel; the shape browser with theme-aware previews,
     categories, favorites, and insertion;

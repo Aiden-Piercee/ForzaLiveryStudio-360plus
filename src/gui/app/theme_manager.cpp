@@ -9,6 +9,7 @@
 #include <QStyleOption>
 
 #include <algorithm>
+#include <cmath>
 
 namespace gui {
 namespace {
@@ -169,7 +170,16 @@ BehaviorSettings loadBehaviorSettings() {
         || fillMode == QStringLiteral("thin")) {
         result.contourFillMode = ContourFillMode::CompactFit;
     }
-    result.autoSavePaths = settings.value(QStringLiteral("ui/behavior/autoSavePaths"), result.autoSavePaths).toBool();
+    const bool legacySavePaths = settings.value(QStringLiteral("ui/behavior/autoSavePaths"), false).toBool();
+    result.autoSavePenPaths = settings.value(QStringLiteral("ui/behavior/autoSavePenPaths"), legacySavePaths).toBool();
+    result.autoSaveLiningPaths = settings.value(QStringLiteral("ui/behavior/autoSaveLiningPaths"), legacySavePaths).toBool();
+    result.bucketTolerance = std::clamp(settings.value(QStringLiteral("ui/behavior/bucketTolerance"), result.bucketTolerance).toInt(), 0, 255);
+    result.liningWidth = settings.value(QStringLiteral("ui/behavior/liningWidth"), result.liningWidth).toDouble();
+    result.liningOutsideMargin = settings.value(QStringLiteral("ui/behavior/liningOutsideMargin"), result.liningOutsideMargin).toDouble();
+    if (!std::isfinite(result.liningWidth)) result.liningWidth = defaults.liningWidth;
+    if (!std::isfinite(result.liningOutsideMargin)) result.liningOutsideMargin = defaults.liningOutsideMargin;
+    result.liningWidth = std::clamp(result.liningWidth, 0.1, 256.0);
+    result.liningOutsideMargin = std::clamp(result.liningOutsideMargin, 0.0, 2.0);
     result.showPropertyDebug = settings.value(QStringLiteral("ui/behavior/showPropertyDebug"), result.showPropertyDebug).toBool();
     result.moveToolAutoSelect = settings.value(QStringLiteral("ui/behavior/moveToolAutoSelect"), result.moveToolAutoSelect).toBool();
     result.pipetteAutoReturn = settings.value(
@@ -232,7 +242,14 @@ void saveBehaviorSettings(const BehaviorSettings &settings) {
     qsettings.setValue(QStringLiteral("ui/behavior/contourFillMode"), fillMode);
     qsettings.remove(QStringLiteral("ui/behavior/differentiablePenFill"));
     qsettings.remove(QStringLiteral("ui/behavior/differentialContourFill"));
-    qsettings.setValue(QStringLiteral("ui/behavior/autoSavePaths"), settings.autoSavePaths);
+    qsettings.remove(QStringLiteral("ui/behavior/autoSavePaths"));
+    qsettings.setValue(QStringLiteral("ui/behavior/autoSavePenPaths"), settings.autoSavePenPaths);
+    qsettings.setValue(QStringLiteral("ui/behavior/autoSaveLiningPaths"), settings.autoSaveLiningPaths);
+    qsettings.remove(QStringLiteral("ui/behavior/liningFillMode"));
+    qsettings.remove(QStringLiteral("ui/behavior/bucketRegionMode"));
+    qsettings.setValue(QStringLiteral("ui/behavior/bucketTolerance"), settings.bucketTolerance);
+    qsettings.setValue(QStringLiteral("ui/behavior/liningWidth"), settings.liningWidth);
+    qsettings.setValue(QStringLiteral("ui/behavior/liningOutsideMargin"), settings.liningOutsideMargin);
     qsettings.setValue(QStringLiteral("ui/behavior/showPropertyDebug"), settings.showPropertyDebug);
     qsettings.setValue(QStringLiteral("ui/behavior/moveToolAutoSelect"), settings.moveToolAutoSelect);
     qsettings.remove(QStringLiteral("ui/behavior/allowMoveOutsideBoundingBox"));

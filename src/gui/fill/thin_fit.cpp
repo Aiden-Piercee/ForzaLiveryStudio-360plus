@@ -3186,7 +3186,13 @@ catalog::FillResult fillLiningPath(const QVector<PenPoint> &points, double width
         result.fill.error = path.valid() ? QStringLiteral("Lining width must be positive") : path.error;
         return result;
     }
-    result = fillOpenTrace(path, points, width, primitives, options, cancelled);
+    if (points.front().endCap != 1.0 || points.back().endCap != 1.0) {
+        auto capOptions = options;
+        capOptions.boundaryAllowance = width * options.liningOutsideMarginWidthFraction;
+        result = fillPolygons(buildLiningRibbon(points, width).toSubpathPolygons(), primitives, capOptions, cancelled);
+    } else {
+        result = fillOpenTrace(path, points, width, primitives, options, cancelled);
+    }
     result.diagnostics.insert(QStringLiteral("liningWidth"), width);
 
     return result;

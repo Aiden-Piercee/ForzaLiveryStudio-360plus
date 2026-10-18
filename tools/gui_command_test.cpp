@@ -9,6 +9,10 @@
 #include "vinyl_decoder.h"
 #include "project_canvas.h"
 #include "canvas_camera.h"
+#include "tool_settings_widget.h"
+#include "lining_fill.h"
+#include "cubic_contour.h"
+#include "image_io.h"
 
 #include <limits>
 
@@ -689,6 +693,256 @@ void moveAutoSelection(Harness &h) {
     h.validate();
 }
 
+void liningCaps() {
+    QVector<gui::PenPoint> points{{{0, 0}, gui::PenPointKind::Hard}, {{100, 0}, gui::PenPointKind::Hard}};
+    points.front().endCap = 0;
+    points.back().endCap = 0;
+    auto ribbon = gui::buildLiningRibbon(points, 20);
+    require(std::abs(ribbon.boundingRect().left()) < 1e-5 && std::abs(ribbon.boundingRect().right() - 100) < 1e-5,
+            "flat Lining caps extend beyond the endpoints");
+    points.back().endCap = 2;
+    ribbon = gui::buildLiningRibbon(points, 20);
+    require(ribbon.contains(QPointF(115, 0)) && std::abs(ribbon.boundingRect().right() - 120) < 1e-5,
+            "convex Lining cap has the wrong shape");
+    points.back().endCap = -1;
+    ribbon = gui::buildLiningRibbon(points, 20);
+    require(!ribbon.contains(QPointF(99, 0)) && ribbon.contains(QPointF(95, 9)), "concave Lining cap did not remove the center");
+    QString error;
+    const auto loops = gui::cubicPathLoops(ribbon, &error);
+    const auto contour = gui::buildPenContour(loops);
+    require(error.isEmpty() && contour.valid(), QString("Lining cap conversion: %1; contour: %2; loops: %3; crossings: %4").arg(error, contour.error).arg(loops.size()).arg(contour.crossings.size()));
+}
+
+void toolSettingsControls(Harness &h) {
+    gui::ProjectCanvas *canvas = nullptr;
+    for (QWidget *widget : h.window.findChildren<QWidget *>()) {
+        if (auto *found = dynamic_cast<gui::ProjectCanvas *>(widget)) canvas = found;
+    }
+    auto *panel = h.window.findChild<QScrollArea *>("ToolSettingsPanel");
+    auto *toolbar = h.window.findChild<QToolBar *>("MainToolBar");
+    auto *settingsBar = h.window.findChild<QToolBar *>("ToolSettingsBar");
+    require(canvas && panel && toolbar && settingsBar, "Tool Settings strip is missing");
+    require(!settingsBar->isHidden(), "Tool Settings was hidden while positioning its row");
+    require(h.window.centralWidget() == canvas && h.window.toolBarArea(settingsBar) == Qt::TopToolBarArea
+            && h.window.toolBarBreak(settingsBar), "Tool Settings must occupy a full window row below the toolbar");
+    require(panel->minimumSizeHint().width() == 0 && panel->sizePolicy().horizontalPolicy() == QSizePolicy::Expanding,
+            "Tool Settings must fill its row independently of the controls' width");
+    QApplication::processEvents();
+    const auto compactHeight = [&]() {
+        const auto *bar = panel->horizontalScrollBar();
+        return panel->widget()->sizeHint().height() + (bar->maximum() > bar->minimum() ? bar->sizeHint().height() : 0);
+    };
+    require(panel->sizeHint().height() == compactHeight() && panel->sizePolicy().verticalPolicy() == QSizePolicy::Fixed,
+            "Tool Settings reserves excess row height");
+    const QByteArray originalLayout = h.window.saveState();
+    QMainWindow legacyWindow;
+    auto *legacyToolbar = legacyWindow.addToolBar("Tools");
+    legacyToolbar->setObjectName("MainToolBar");
+    auto *legacyPanel = legacyWindow.addToolBar("Tool Settings");
+    legacyPanel->setObjectName("ToolSettingsBar");
+    legacyPanel->hide();
+    QSettings().setValue("layout/state", legacyWindow.saveState());
+    {
+        gui::MainWindow restored;
+        auto *restoredSettings = restored.findChild<QToolBar *>("ToolSettingsBar");
+        require(restoredSettings && restored.toolBarArea(restoredSettings) == Qt::TopToolBarArea
+                && restored.toolBarBreak(restoredSettings) && !restoredSettings->isHidden(),
+                "restoring an old layout misplaced or hid Tool Settings");
+    }
+    QSettings().remove("layout/state");
+    require(h.window.restoreState(legacyWindow.saveState()), "legacy toolbar layout could not be restored");
+    h.window.findChild<QAction *>("reset_layout")->trigger();
+    require(h.window.toolBarBreak(settingsBar) && !settingsBar->isHidden(), "resetting the layout misplaced or hid Tool Settings");
+    require(h.window.restoreState(originalLayout), "original toolbar layout could not be restored");
+    const QSize toolbarSize = toolbar->sizeHint();
+    canvas->setTool("lining");
+    QApplication::processEvents();
+    require(toolbar->sizeHint() == toolbarSize && !toolbar->isAncestorOf(panel),
+            "Lining settings changed the tool toolbar size");
+    require(panel->sizeHint().height() == compactHeight(), "Lining settings reserve excess row height");
+    require(panel->widget()->layout()->spacing() <= 6, "Tool Settings controls have excessive spacing");
+    for (auto *slider : panel->findChildren<QSlider *>()) {
+        require(slider->maximumWidth() <= 60, "Tool Settings slider is too wide");
+    }
+    for (auto *field : panel->findChildren<QDoubleSpinBox *>()) {
+        require(field->sizePolicy().horizontalPolicy() == QSizePolicy::Fixed
+                && field->parentWidget()->sizePolicy().horizontalPolicy() == QSizePolicy::Fixed,
+                "Tool Settings numeric fields must retain their natural width");
+    }
+    for (const QString &id : {"toggle_move_auto_select", "toggle_selection_flash", "toggle_pipette_auto_return",
+            "toggle_auto_save_pen_paths", "toggle_auto_save_lining_paths", "toggle_transform_relative",
+            "select_analytic_contour_fill", "select_compact_contour_fill"}) {
+        auto *action = h.window.findChild<QAction *>(id);
+        require(action && action->parent() == panel->widget(), "Tool Settings shortcut is missing: " + id);
+        for (auto *menu : h.window.findChildren<QMenu *>()) {
+            require(!menu->actions().contains(action), "Tool Settings option is duplicated in a menu: " + id);
+        }
+    }
+    for (auto *menu : h.window.findChildren<QMenu *>()) {
+        require(menu->title() != "Contour Fill", "Contour Fill menu still duplicates Tool Settings");
+    }
+    for (bool enabled : {false, true}) {
+        auto behavior = gui::loadBehaviorSettings();
+        behavior.selectShapesByBoundingBox = enabled;
+        behavior.showSelectedShapeOutlines = enabled;
+        behavior.displayAnchorsDuringTransformDrag = enabled;
+        gui::SettingsDialog dialog(gui::loadUiTheme(), gui::loadCanvasColorSettings(), gui::loadPreviewBackgroundSettings(), behavior, {});
+        for (auto *label : dialog.findChildren<QLabel *>()) {
+            require(!QStringList{"Select shapes by bounding box", "Show selected-shape outlines", "Display anchors during transform drag"}.contains(label->text()),
+                    "Settings dialog still duplicates a Tool Settings option: " + label->text());
+        }
+        const auto after = dialog.selectedBehaviorSettings();
+        require(after.selectShapesByBoundingBox == enabled && after.showSelectedShapeOutlines == enabled
+                && after.displayAnchorsDuringTransformDrag == enabled, "Settings dialog overwrites Tool Settings values");
+    }
+    const auto check = [&](const QString &key) {
+        auto *field = h.window.findChild<QCheckBox *>("toolSettings." + key);
+        require(field != nullptr, "Tool Settings checkbox is missing: " + key);
+        return field;
+    };
+    const auto number = [&](const QString &key) {
+        auto *field = h.window.findChild<QDoubleSpinBox *>("toolSettings." + key);
+        require(field != nullptr, "Tool Settings number is missing: " + key);
+        return field;
+    };
+    const auto choice = [&](const QString &key) {
+        auto *field = h.window.findChild<QComboBox *>("toolSettings." + key);
+        require(field != nullptr, "Tool Settings choice is missing: " + key);
+        return field;
+    };
+    const auto figures = [&]() { return gui::sceneLeaves<fls::scene::ContourFigure, fls::scene::LayerKind::Contour>(*h.state->project()->root); };
+    const auto newFigure = [&]() -> const fls::scene::ContourFigure * {
+        for (const auto *figure : figures()) if (figure->id != "path") return figure;
+        return nullptr;
+    };
+    h.reset();
+    canvas->setTool("move");
+    auto *move = check("moveToolAutoSelect");
+    move->click();
+    require(gui::loadBehaviorSettings().moveToolAutoSelect == move->isChecked()
+            && canvas->moveToolAutoSelect() == move->isChecked()
+            && h.window.findChild<QAction *>("toggle_move_auto_select")->isChecked() == move->isChecked(), "Move setting did not propagate");
+    h.window.findChild<QAction *>("toggle_move_auto_select")->trigger();
+    require(move->isChecked() == canvas->moveToolAutoSelect(), "Move shortcut did not update Tool Settings");
+    canvas->setTool("select");
+    require(!check("selectionFlashEnabled")->isHidden() && move->isHidden(), "Tool Settings shows controls for another tool");
+    check("selectionFlashEnabled")->click();
+    require(canvas->selectionFlashEnabled() == check("selectionFlashEnabled")->isChecked(), "selection flash did not propagate");
+    canvas->setTool("transform");
+    check("relativeMode")->click();
+    require(gui::loadTransformModeSettings().relativeMode == check("relativeMode")->isChecked()
+            && h.window.findChild<QAction *>("toggle_transform_relative")->isChecked() == check("relativeMode")->isChecked(), "relative mode did not synchronize");
+    canvas->setTool("pipette");
+    check("pipetteAutoReturn")->click();
+    require(gui::loadBehaviorSettings().pipetteAutoReturn == check("pipetteAutoReturn")->isChecked(), "Pipette setting did not persist");
+    canvas->setTool("bucket");
+    auto *slider = h.window.findChild<QSlider *>("toolSettings.bucketTolerance.slider");
+    slider->setValue(47);
+    require(number("bucketTolerance")->value() == 47 && canvas->bucketTolerance() == 47, "Tolerance slider did not update the field and canvas");
+    number("bucketTolerance")->setValue(61);
+    require(slider->value() == 61 && canvas->bucketTolerance() == 61, "Tolerance field did not update the slider and canvas");
+    QWheelEvent wheel(QPointF(200, 200), canvas->mapToGlobal(QPoint(200, 200)), {}, QPoint(0, 120), {}, {}, Qt::NoScrollPhase, false);
+    QApplication::sendEvent(canvas, &wheel);
+    require(canvas->bucketTolerance() == 62 && number("bucketTolerance")->value() == 62 && slider->value() == 62,
+            "canvas scrolling did not update Tool Settings");
+    require(!h.window.findChild<QComboBox *>("toolSettings.bucketRegionMode"), "Bucket still exposes a region mode");
+    canvas->setTool("pen");
+    choice("contourFillMode")->setCurrentIndex(1);
+    require(gui::loadBehaviorSettings().contourFillMode == gui::ContourFillMode::CompactFit, "Pen mode did not persist");
+    h.window.findChild<QAction *>("select_analytic_contour_fill")->trigger();
+    require(choice("contourFillMode")->currentIndex() == 0, "Pen mode shortcut did not update Tool Settings");
+    if (!check("autoSavePenPaths")->isChecked()) check("autoSavePenPaths")->click();
+    require(!gui::loadBehaviorSettings().autoSaveLiningPaths, "Pen Save Path changed Lining Save Path");
+    h.reset(); canvas->setTool("pen"); canvas->resize(1000, 600);
+    click(canvas, QPoint(200, 200)); click(canvas, QPoint(350, 200)); click(canvas, QPoint(350, 350));
+    require(figures().size() == 1, "unfinished Pen path was saved");
+    click(canvas, QPoint(200, 200));
+    require(figures().size() == 2 && newFigure()->data.closed && h.commands.contains(gui::EditorCommandType::Insert), "Pen did not save on contour completion");
+    h.trigger("undo");
+    require(figures().size() == 1, "automatic Pen save undo failed");
+    h.trigger("redo");
+    require(figures().size() == 2, "automatic Pen save redo failed");
+    h.reset(); canvas->setTool("lining");
+    require(!h.window.findChild<QComboBox *>("toolSettings.liningFillMode"), "Lining still exposes alternative fill modes");
+    number("liningWidth")->setValue(20);
+    require(canvas->liningWidth() == 20, "Lining width did not propagate");
+    number("liningOutsideMargin")->setValue(35);
+    require(std::abs(gui::loadBehaviorSettings().liningOutsideMargin - 0.35) < 1e-9, "Lining margin did not propagate");
+    const auto completeLine = [&]() {
+        click(canvas, QPoint(200, 200)); click(canvas, QPoint(400, 200));
+        const QPoint point(400, 200);
+        QMouseEvent press(QEvent::MouseButtonPress, point, canvas->mapToGlobal(point), Qt::RightButton, Qt::RightButton, {});
+        QApplication::sendEvent(canvas, &press);
+        QMouseEvent release(QEvent::MouseButtonRelease, point, canvas->mapToGlobal(point), Qt::RightButton, Qt::NoButton, {});
+        QApplication::sendEvent(canvas, &release);
+    };
+    completeLine();
+    require(figures().size() == 1, "disabled Lining Save Path still saved a line");
+    check("autoSaveLiningPaths")->click();
+    h.reset(); canvas->setTool("lining"); completeLine();
+    require(figures().size() == 2 && newFigure()->data.pathKind == fls::scene::ContourPathKind::Lining, "Lining did not save on line completion");
+    const QString id = newFigure()->id;
+    const auto data = newFigure()->data;
+    const double scale = 200.0 / QLineF(data.points.front().position, data.points.back().position).length();
+    const double radius = gui::liningPointWidth(data.points.back(), data.strokeWidth) * scale * 0.5;
+    const QPointF start = QPointF(400, 200) + QPointF(radius + 12, 0);
+    const QPointF end = start - QPointF(radius * 2, 0);
+    QMouseEvent press(QEvent::MouseButtonPress, start, canvas->mapToGlobal(start.toPoint()), Qt::LeftButton, Qt::LeftButton, {});
+    QApplication::sendEvent(canvas, &press);
+    QMouseEvent moveCap(QEvent::MouseMove, end, canvas->mapToGlobal(end.toPoint()), Qt::NoButton, Qt::LeftButton, {});
+    QApplication::sendEvent(canvas, &moveCap);
+    QMouseEvent release(QEvent::MouseButtonRelease, end, canvas->mapToGlobal(end.toPoint()), Qt::LeftButton, Qt::NoButton, {});
+    QApplication::sendEvent(canvas, &release);
+    auto *figure = static_cast<const fls::scene::ContourFigure *>(h.state->sceneNode(id));
+    require(figure->data.points.back().endCap < -0.9 && figure->data.points.back().position == data.points.back().position,
+            "Lining cap handle did not change the cap independently of its endpoint");
+    h.trigger("undo");
+    require(static_cast<const fls::scene::ContourFigure *>(h.state->sceneNode(id))->data == data, "Lining cap undo failed");
+    h.trigger("redo");
+    auto restored = fls::decodeProjectDocument(fls::encodeProjectDocument(*h.state->project()));
+    require(static_cast<const fls::scene::ContourFigure *>(nodeIn(*restored.root, id))->data.points.back().endCap < -0.9,
+            "Lining cap was not saved in the project");
+    QMouseEvent doubleClick(QEvent::MouseButtonDblClick, end, canvas->mapToGlobal(end.toPoint()), Qt::LeftButton, Qt::LeftButton, {});
+    QApplication::sendEvent(canvas, &doubleClick);
+    require(static_cast<const fls::scene::ContourFigure *>(h.state->sceneNode(id))->data.points.back().endCap == 0,
+            "double-click did not reset the Lining cap to flat");
+    QImage image(256, 256, QImage::Format_ARGB32);
+    image.fill(Qt::white);
+    {
+        QPainter painter(&image);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(Qt::black);
+        painter.drawEllipse(QPointF(128, 128), 80, 80);
+        painter.setBrush(Qt::white);
+        painter.drawEllipse(QPointF(128, 128), 15, 15);
+    }
+    fls::Project guideProject;
+    fls::scene::ensureProjectSceneRoot(guideProject);
+    auto guide = std::make_unique<fls::scene::GuideLayer>();
+    guide->id = "bucket-guide";
+    guide->image = std::make_unique<fls::scene::RasterContainer>();
+    guide->image->width = guide->image->height = 256;
+    guide->image->encoded = gui::encodeGuideImage(image, &guide->image->format);
+    guideProject.root->append(std::move(guide));
+    {
+        h.reset(guideProject);
+        h.select({"bucket-guide"});
+        canvas->setTool("bucket");
+        QSettings().setValue("ui/behavior/bucketRegionMode", 1);
+        gui::CanvasCamera camera;
+        camera.setViewBounds(QRectF(-128, -128, 256, 256));
+        camera.recompute(QPointF(28, 28), canvas->width() - 28, canvas->height() - 28);
+        click(canvas, camera.worldToScreen(QPointF(32, 0)).toPoint());
+        const auto contours = figures();
+        require(canvas->tool() == "pen" && contours.size() == 1, "Bucket did not produce a saved Pen contour");
+        const auto &converted = contours.front()->data;
+        require(converted.closed && converted.cutouts.size() == 1, "Bucket mode lost its contour or cutout");
+        const auto hard = [](const gui::PenPoint &point) { return point.kind == gui::PenPointKind::Hard; };
+        const bool polygonal = std::all_of(converted.points.begin(), converted.points.end(), hard);
+        require(!polygonal, "Bucket retained the removed Polygon preference");
+    }
+}
+
 void actions(Harness &h) {
     const QStringList expected{"undo", "redo", "copy", "cut", "paste", "group_ungroup", "ungroup_flat",
         "fold_all_groups", "delete_selected", "stamp", "flip_selection", "center_view_on_selection",
@@ -761,6 +1015,7 @@ int main(int argc, char **argv) {
     QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, settings.path());
     QSettings().setValue("ui/behavior/autosaveIntervalMinutes", 0);
     QSettings().setValue("ui/behavior/pasteInPlace", true);
+    gui::applyUiTheme(application, gui::loadUiTheme());
     try {
         Harness harness;
         flags(harness);
@@ -771,6 +1026,8 @@ int main(int argc, char **argv) {
         actions(harness);
         liveryMoves(harness);
         moveAutoSelection(harness);
+        liningCaps();
+        toolSettingsControls(harness);
     } catch (const std::exception &error) {
         QTextStream(stderr) << error.what() << '\n';
         return 1;

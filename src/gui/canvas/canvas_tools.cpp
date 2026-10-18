@@ -626,6 +626,20 @@ bool LiningTool::handlePress(QMouseEvent *event) {
     }
     ProjectCanvas &c = canvas_;
     const QPointF world = c.screenToWorld(event->position());
+    const auto capHit = c.liningCapHandleAtScreen(event->position());
+    if (capHit.valid()) {
+        c.beginPathEdit(c.lining_);
+        if (event->button() == Qt::RightButton) {
+            c.lining_.points[capHit.pointIndex].endCap = 0.0;
+            c.commitPathEdit(c.lining_);
+        } else {
+            c.lining_.dragPoint = capHit.pointIndex;
+            c.lining_.dragHandle = 3;
+        }
+        c.refreshLiningInteractionHint(event->position(), event->modifiers());
+        event->accept();
+        return true;
+    }
     const auto widthHit = c.liningWidthHandleAtScreen(event->position());
 
     if (widthHit.valid()) {
@@ -738,7 +752,13 @@ bool LiningTool::handleMove(QMouseEvent *event) {
         return false;
     }
     auto &point = c.lining_.points[c.lining_.dragPoint];
-    if (c.lining_.dragHandle != 0) {
+    if (c.lining_.dragHandle == 3) {
+        const QPointF outward = liningEndpointDirection(c.lining_.points, c.lining_.dragPoint);
+        const double offset = c.camera_.worldPerPixel() * ProjectCanvas::kLiningWidthHandleOffsetPixels;
+        const double distance = QPointF::dotProduct(c.screenToWorld(event->position()) - point.position, outward) - offset;
+        const double radius = liningPointWidth(point, c.lining_.strokeWidth) * 0.5;
+        point.endCap = std::clamp(distance / radius, -2.0, 2.0);
+    } else if (c.lining_.dragHandle != 0) {
         const double distance = std::abs(QPointF::dotProduct(c.screenToWorld(event->position()) - point.position,
             c.liningWidthNormal(c.lining_.dragPoint))) - c.camera_.worldPerPixel() * ProjectCanvas::kLiningWidthHandleOffsetPixels;
         point.strokeWidth = std::clamp(distance * 2.0, ProjectCanvas::kMinimumLiningWidth, ProjectCanvas::kMaximumLiningWidth);
@@ -770,7 +790,16 @@ bool LiningTool::handleWheel(QWheelEvent *event) {
     if (event->modifiers() & Qt::ShiftModifier) {
         steps *= 5;
     }
-    canvas_.adjustLiningWidth(steps * 0.5, event->position());
+    const auto cap = canvas_.liningCapHandleAtScreen(event->position());
+    if (cap.valid()) {
+        canvas_.beginPathEdit(canvas_.lining_);
+        auto &point = canvas_.lining_.points[cap.pointIndex];
+        point.endCap = std::clamp(point.endCap + steps * 0.1, -2.0, 2.0);
+        canvas_.commitPathEdit(canvas_.lining_);
+        canvas_.refreshLiningInteractionHint(event->position(), event->modifiers());
+    } else {
+        canvas_.adjustLiningWidth(steps * 0.5, event->position());
+    }
     event->accept();
     return true;
 }
@@ -796,6 +825,13 @@ bool LiningTool::handleDoubleClick(QMouseEvent *event) {
     }
     ProjectCanvas &c = canvas_;
     if (c.lining_.closed) {
+        const auto cap = c.liningCapHandleAtScreen(event->position());
+        if (cap.valid()) {
+            c.beginPathEdit(c.lining_);
+            c.lining_.points[cap.pointIndex].endCap = 0.0;
+            c.commitPathEdit(c.lining_);
+            c.refreshLiningInteractionHint(event->position(), event->modifiers());
+        }
         event->accept();
         return true;
     }
@@ -818,7 +854,7 @@ bool LiningTool::handleDoubleClick(QMouseEvent *event) {
 }
 
 Qt::CursorShape LiningTool::idleCursorShape(const QPointF &point) const {
-    if (canvas_.liningWidthHandleAtScreen(point).valid())
+    if (canvas_.liningWidthHandleAtScreen(point).valid() || canvas_.liningCapHandleAtScreen(point).valid())
         return Qt::SizeAllCursor;
     if (canvas_.lining_.closed
         && (QGuiApplication::keyboardModifiers() & Qt::AltModifier)

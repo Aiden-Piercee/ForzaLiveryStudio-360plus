@@ -276,13 +276,31 @@ bool ProjectCanvas::updateBucketPreview(const QPointF &screenPoint,
     return true;
 }
 
-void ProjectCanvas::adjustBucketTolerance(int delta, const QPointF &screenPoint,
-                                          bool forceRaster) {
-    bucket_.tolerance = std::clamp(bucket_.tolerance + delta, 0, 255);
+void ProjectCanvas::setBucketTolerance(int tolerance) {
+    const int value = std::clamp(tolerance, 0, 255);
+    if (bucket_.tolerance == value) return;
+    bucket_.tolerance = value;
+    QSettings().setValue(QStringLiteral("ui/behavior/bucketTolerance"), value);
     bucket_.guideId.clear();
     bucket_.seedPixel = QPoint(-1, -1);
-    bucket_.fill = BucketFillResult{};
+    bucket_.fill = {};
     bucket_.previewImage = {};
+    if (tool_ == QStringLiteral("bucket") && project_ != nullptr) {
+        updateBucketPreview(cursorHintPoint_, bucket_.forcedRasterMode);
+    }
+    if (bucketToleranceChangedCallback_) bucketToleranceChangedCallback_(value);
+}
+
+int ProjectCanvas::bucketTolerance() const {
+    return bucket_.tolerance;
+}
+
+void ProjectCanvas::setBucketToleranceChangedCallback(std::function<void(int)> callback) {
+    bucketToleranceChangedCallback_ = std::move(callback);
+}
+
+void ProjectCanvas::adjustBucketTolerance(int delta, const QPointF &screenPoint, bool forceRaster) {
+    setBucketTolerance(bucket_.tolerance + delta);
     updateBucketPreview(screenPoint, forceRaster);
 }
 
@@ -348,8 +366,9 @@ bool ProjectCanvas::commitBucketPreview(const QPointF &screenPoint,
             : bucket_.fill.averageColor;
         fillMask = bucket_.fill.transparentTarget;
     }
-    if (bucket_.vectorMode)
+    if (bucket_.vectorMode) {
         conversion = regionOutlineToPenLoops(outline, conversionOptions);
+    }
     if (!conversion.valid()) {
         setCursorHint(screenPoint,
                       {bucket_.vectorMode
@@ -415,6 +434,7 @@ bool ProjectCanvas::commitBucketPreview(const QPointF &screenPoint,
     clearBucketPreview();
     setTool(QStringLiteral("pen"));
     validatePenInteraction();
+    if (loadBehaviorSettings().autoSavePenPaths && pen_.error.isEmpty()) savePathFigure(false);
     refreshPenInteractionHint(screenPoint, QGuiApplication::keyboardModifiers());
     return true;
 }

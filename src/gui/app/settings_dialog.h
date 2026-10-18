@@ -73,7 +73,6 @@ private:
     QPushButton *layersBackgroundColorButton_ = nullptr;
     QPushButton *guidelineColorButton_ = nullptr;
     QCheckBox *visibilityBordersCheck_ = nullptr;
-    QCheckBox *displayAnchorsDuringTransformDrag_ = nullptr;
     QCheckBox *generatePreviewsWithTransformations_ = nullptr;
     QComboBox *visibilityBorderResolution_ = nullptr;
     QDoubleSpinBox *nudgeStep_ = nullptr;
@@ -86,8 +85,6 @@ private:
     QCheckBox *pasteInPlace_ = nullptr;
     QComboBox *toolbarViewCombo_ = nullptr;
     QCheckBox *separateSelectAndMarqueeToolsCheck_ = nullptr;
-    QCheckBox *selectShapesByBoundingBoxCheck_ = nullptr;
-    QCheckBox *showSelectedShapeOutlinesCheck_ = nullptr;
     QCheckBox *separateOpacityAndSkewToolsCheck_ = nullptr;
     QCheckBox *valueEditingWheelCheck_ = nullptr;
     QComboBox *systemIconSetCombo_ = nullptr;

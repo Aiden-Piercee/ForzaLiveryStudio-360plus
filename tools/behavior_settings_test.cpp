@@ -21,7 +21,13 @@ int main(int argc, char **argv) {
         QSettings settings;
         const auto require = [](bool condition) { if (!condition) { throw std::runtime_error("Contour fill settings mismatch"); } };
         require(gui::loadBehaviorSettings().contourFillMode == gui::ContourFillMode::Analytic);
-        require(!gui::loadBehaviorSettings().autoSavePaths);
+        require(!gui::loadBehaviorSettings().autoSavePenPaths);
+        require(!gui::loadBehaviorSettings().autoSaveLiningPaths);
+        settings.setValue(QStringLiteral("ui/behavior/autoSavePaths"), true);
+        settings.sync();
+        require(gui::loadBehaviorSettings().autoSavePenPaths && gui::loadBehaviorSettings().autoSaveLiningPaths);
+        settings.remove(QStringLiteral("ui/behavior/autoSavePaths"));
+        settings.sync();
         require(!gui::loadBehaviorSettings().separateSelectAndMarqueeTools);
         require(!gui::loadBehaviorSettings().selectShapesByBoundingBox);
         require(gui::loadBehaviorSettings().showSelectedShapeOutlines);
@@ -38,9 +44,11 @@ int main(int argc, char **argv) {
         }
         for (bool enabled : {true, false}) {
             auto behavior = gui::loadBehaviorSettings();
-            behavior.autoSavePaths = enabled;
+            behavior.autoSavePenPaths = enabled;
+            behavior.autoSaveLiningPaths = !enabled;
             gui::saveBehaviorSettings(behavior);
-            require(gui::loadBehaviorSettings().autoSavePaths == enabled);
+            require(gui::loadBehaviorSettings().autoSavePenPaths == enabled);
+            require(gui::loadBehaviorSettings().autoSaveLiningPaths != enabled);
         }
         settings.setValue(QStringLiteral("ui/behavior/contourFillMode"), QStringLiteral("catalog"));
         settings.sync();
@@ -54,6 +62,8 @@ int main(int argc, char **argv) {
         settings.remove(QStringLiteral("ui/behavior/contourFillMode"));
         settings.setValue(QStringLiteral("ui/behavior/differentialContourFill"), true);
         settings.setValue(QStringLiteral("ui/behavior/differentiablePenFill"), true);
+        settings.setValue(QStringLiteral("ui/behavior/liningFillMode"), 2);
+        settings.setValue(QStringLiteral("ui/behavior/bucketRegionMode"), 1);
         settings.sync();
         require(gui::loadBehaviorSettings().contourFillMode == gui::ContourFillMode::Analytic);
         for (auto mode : {gui::ContourFillMode::Analytic, gui::ContourFillMode::CompactFit}) {
@@ -66,6 +76,8 @@ int main(int argc, char **argv) {
         require(settings.value(QStringLiteral("ui/behavior/contourFillMode")).toString() == QStringLiteral("compact"));
         require(!settings.contains(QStringLiteral("ui/behavior/differentialContourFill")));
         require(!settings.contains(QStringLiteral("ui/behavior/differentiablePenFill")));
+        require(!settings.contains(QStringLiteral("ui/behavior/liningFillMode")));
+        require(!settings.contains(QStringLiteral("ui/behavior/bucketRegionMode")));
     } catch (const std::exception &error) {
         QTextStream(stderr) << error.what() << '\n';
         return 1;

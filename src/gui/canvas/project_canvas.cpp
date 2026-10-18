@@ -69,8 +69,9 @@ PathInteractionState transformedPathState(PathInteractionState state, const QTra
             const double mappedLength = length > 0.0
                 ? QLineF(transform.map(QPointF()), transform.map(tangent / length)).length() : 0.0;
             auto &point = state.points[pointIndex];
-            point.strokeWidth = liningPointWidth(point, state.strokeWidth)
-                * (mappedLength > 0.0 ? determinant / mappedLength : widthScale);
+            const double normalScale = mappedLength > 0.0 ? determinant / mappedLength : widthScale;
+            point.strokeWidth = liningPointWidth(point, state.strokeWidth) * normalScale;
+            if (normalScale > 0.0) point.endCap *= mappedLength / normalScale;
         }
         state.strokeWidth *= widthScale;
     }
@@ -813,7 +814,8 @@ void ProjectCanvas::commitPathEdit(PathInteraction &path) {
     if (!path.pendingEdit.has_value()) {
         return;
     }
-    if (!pathStatesEqual(*path.pendingEdit, capturePathState(path))) {
+    const bool changed = !pathStatesEqual(*path.pendingEdit, capturePathState(path));
+    if (changed) {
         if (isSavedFigurePath(path)) {
             storePathFigure();
         } else {
@@ -825,6 +827,13 @@ void ProjectCanvas::commitPathEdit(PathInteraction &path) {
         }
     }
     path.pendingEdit.reset();
+    const auto settings = loadBehaviorSettings();
+    const bool save = &path == &pen_ ? settings.autoSavePenPaths : settings.autoSaveLiningPaths;
+    const bool active = (&path == &pen_ && tool_ == QStringLiteral("pen"))
+        || (&path == &lining_ && tool_ == QStringLiteral("lining"));
+    if (changed && save && active && path.closed && path.cutoutClosed && path.error.isEmpty() && !isSavedFigurePath(path)) {
+        if (!savePathFigure(false)) path.error = QStringLiteral("Could not save the completed path");
+    }
 }
 
 void ProjectCanvas::cancelPathEdit(PathInteraction &path) {
@@ -1185,6 +1194,7 @@ void ProjectCanvas::setLiningWidth(double width) {
     if (!lining_.points.isEmpty())
         beginPathEdit(lining_);
     lining_.strokeWidth = adjusted;
+    QSettings().setValue(QStringLiteral("ui/behavior/liningWidth"), adjusted);
     for (auto &point : lining_.points)
         point.strokeWidth = adjusted;
     if (!lining_.points.isEmpty())
@@ -1235,11 +1245,6 @@ void ProjectCanvas::closePenPath() {
         update();
         return;
     }
-    if (loadBehaviorSettings().autoSavePaths && !savePathFigure(false)) {
-        pen_.error = QStringLiteral("Could not save the Pen path before filling");
-        update();
-        return;
-    }
     const QVector<PenLoop> loops = currentPenLoops();
     const std::optional<QColor> fillColor = pen_.fillColor;
     const bool fillMask = pen_.fillMask;
@@ -1269,11 +1274,6 @@ void ProjectCanvas::requestLiningFill() {
         lining_.error = QStringLiteral("Lining fill is unavailable");
         refreshLiningInteractionHint(worldToScreen(lining_.hoverWorld),
                                      QGuiApplication::keyboardModifiers());
-        update();
-        return;
-    }
-    if (loadBehaviorSettings().autoSavePaths && !savePathFigure(false)) {
-        lining_.error = QStringLiteral("Could not save the Lining path before filling");
         update();
         return;
     }

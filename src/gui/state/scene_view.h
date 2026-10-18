@@ -101,7 +101,10 @@ inline QRectF sceneLocalRect(const fls::scene::Layer &node, const ShapeGeometryS
             for (const auto &point : figure.data.points) {
                 width = std::max(width, point.strokeWidth);
             }
-            bounds.adjust(-width * 0.5, -width * 0.5, width * 0.5, width * 0.5);
+            double capScale = 1.0;
+            if (!figure.data.points.isEmpty()) capScale = std::max({capScale, figure.data.points.front().endCap, figure.data.points.back().endCap});
+            const double extent = width * capScale * 0.5;
+            bounds.adjust(-extent, -extent, extent, extent);
         }
 
         return bounds;

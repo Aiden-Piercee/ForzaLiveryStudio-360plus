@@ -27,10 +27,6 @@
     "hasTip": true,
     "tip": "Background color in Layers widget previews."
   },
-  "tools.display_anchors": {
-    "hasTip": true,
-    "tip": "Keeps transform handles visible while a transform drag is in progress."
-  },
   "tools.nudge_small": {
     "hasTip": true,
     "tip": "Distance moved by an arrow key press in Move or Transform."
@@ -46,14 +42,6 @@
   "tools.separate_select_marquee": {
     "hasTip": true,
     "tip": "When off, Select supports both click selection and dragging a marquee. Turn on to restore separate tools."
-  },
-  "tools.select_bounding_box": {
-    "hasTip": true,
-    "tip": "Select shapes through their rectangular bounds. When off, clicks and marquees use the shape body, including holes and transparent areas."
-  },
-  "tools.selected_outlines": {
-    "hasTip": true,
-    "tip": "Keep the silhouette of each selected shape visible in every tool. Hover outlines remain available in the selection tools."
   },
   "tools.separate_opacity_skew": {
     "hasTip": true,
