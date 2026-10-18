@@ -169,6 +169,7 @@ BehaviorSettings loadBehaviorSettings() {
         || fillMode == QStringLiteral("thin")) {
         result.contourFillMode = ContourFillMode::CompactFit;
     }
+    result.autoSavePaths = settings.value(QStringLiteral("ui/behavior/autoSavePaths"), result.autoSavePaths).toBool();
     result.showPropertyDebug = settings.value(QStringLiteral("ui/behavior/showPropertyDebug"), result.showPropertyDebug).toBool();
     result.moveToolAutoSelect = settings.value(QStringLiteral("ui/behavior/moveToolAutoSelect"), result.moveToolAutoSelect).toBool();
     result.allowMoveOutsideBoundingBox = settings.value(
@@ -227,6 +228,7 @@ void saveBehaviorSettings(const BehaviorSettings &settings) {
     qsettings.setValue(QStringLiteral("ui/behavior/contourFillMode"), fillMode);
     qsettings.remove(QStringLiteral("ui/behavior/differentiablePenFill"));
     qsettings.remove(QStringLiteral("ui/behavior/differentialContourFill"));
+    qsettings.setValue(QStringLiteral("ui/behavior/autoSavePaths"), settings.autoSavePaths);
     qsettings.setValue(QStringLiteral("ui/behavior/showPropertyDebug"), settings.showPropertyDebug);
     qsettings.setValue(QStringLiteral("ui/behavior/moveToolAutoSelect"), settings.moveToolAutoSelect);
     qsettings.setValue(QStringLiteral("ui/behavior/allowMoveOutsideBoundingBox"), settings.allowMoveOutsideBoundingBox);

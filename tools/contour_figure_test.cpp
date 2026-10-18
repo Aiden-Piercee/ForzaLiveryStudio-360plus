@@ -2,8 +2,11 @@
 #include "flat_payload.h"
 #include "project_codec.h"
 #include "scene_codec.h"
+#include "property_panel.h"
+#include "path_interaction.h"
+#include "scene_view.h"
 
-#include <QCoreApplication>
+#include <QApplication>
 #include <QDebug>
 
 #include <stdexcept>
@@ -23,7 +26,8 @@ fls::scene::ContourFigure *figureIn(gui::EditorState &state) {
 } // namespace
 
 int main(int argc, char **argv) {
-    QCoreApplication application(argc, argv);
+    qputenv("QT_QPA_PLATFORM", "minimal");
+    QApplication application(argc, argv);
 
     try {
         fls::Project project;
@@ -69,6 +73,39 @@ int main(int argc, char **argv) {
         state.setSelectedLayerIds({QStringLiteral("contour")});
         require(state.selectedLayerIds().contains(QStringLiteral("contour")), "contour cannot be selected");
         require(state.selectedLayers().isEmpty(), "contour is counted as a native shape");
+        require(state.selectedContours().size() == 1, "selected contour cannot be edited in Properties");
+        gui::PropertyPanel properties(&state);
+        properties.setSelection({}, {}, {}, state.selectedContours());
+        const std::array<quint8, 4> newColor{37, 61, 219, 255};
+        properties.applyColorToSelection(newColor);
+        require(figureIn(state)->data.fillColor == QColor(219, 61, 37), "Properties did not set the saved fill color");
+        require(properties.currentSelectionColor() == newColor, "Properties did not refresh the saved path color");
+        state.undo();
+        require(figureIn(state)->data == expected, "undo did not restore the saved path color");
+        require(gui::contourOutlineStrokeColor(QColor(Qt::black)) == QColor(Qt::white), "dark path stroke is not white");
+        require(gui::contourOutlineStrokeColor(QColor(Qt::white)) == QColor(Qt::black), "light path stroke is not black");
+
+        gui::PathInteraction lining(fls::scene::ContourPathKind::Lining);
+        require(lining.fillColor == QColor(Qt::black), "new Lining path is not black");
+        lining.fillColor = QColor(Qt::red);
+        lining.reset();
+        require(lining.fillColor == QColor(Qt::black), "reset Lining path is not black");
+        auto liningFigure = std::make_unique<fls::scene::ContourFigure>();
+        liningFigure->id = QStringLiteral("lining");
+        liningFigure->data.pathKind = fls::scene::ContourPathKind::Lining;
+        liningFigure->data.strokeWidth = 12.5;
+        liningFigure->data.closed = true;
+        liningFigure->data.points = {{{0, 0}, fls::scene::ContourPointKind::Hard, {}, {}, false, 4.0},
+                                     {{40, 10}, fls::scene::ContourPointKind::Soft, {}, {}, false, 9.0},
+                                     {{80, 0}, fls::scene::ContourPointKind::Hard, {}, {}, false, 14.0}};
+        const auto expectedLining = liningFigure->data;
+        auto liningProject = *state.project();
+        liningProject.root->append(std::move(liningFigure));
+        auto restoredLiningProject = fls::decodeProjectDocument(fls::encodeProjectDocument(liningProject));
+        const auto *restoredLining = dynamic_cast<const fls::scene::ContourFigure *>(restoredLiningProject.root->children.back().get());
+        require(restoredLining != nullptr && restoredLining->data == expectedLining, "saved Lining lost its tool type or widths");
+        require(fls::scene::contourFillColor(restoredLining->data) == QColor(Qt::black), "saved Lining default color is not black");
+
         state.beginProjectEdit();
         figureIn(state)->data.points[1].position.setY(42);
         state.commitProjectEdit();
@@ -92,6 +129,11 @@ int main(int argc, char **argv) {
         require(!figureIn(state)->visible, "contour visibility toggle failed");
         state.setGroupAndDescendantLocked(QStringLiteral("group"), true);
         require(state.isLayerLocked(QStringLiteral("contour")), "contour does not inherit group locking");
+        properties.setSelection({}, {}, {}, state.selectedContours());
+        require(!properties.currentSelectionColor().has_value(), "locked contour color can be edited");
+        const auto lockedColor = figureIn(state)->data.fillColor;
+        properties.applyColorToSelection(newColor);
+        require(figureIn(state)->data.fillColor == lockedColor, "Properties changed a locked contour color");
         require(!state.duplicateEntriesInPlace({QStringLiteral("contour")}), "locked contour can be duplicated");
 
         const QByteArray withContour = fls::buildFlatPayload(*state.project());

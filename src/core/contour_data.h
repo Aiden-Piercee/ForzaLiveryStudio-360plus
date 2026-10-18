@@ -9,6 +9,11 @@
 namespace fls::scene {
 
 enum class ContourPointKind { Hard, Soft };
+enum class ContourPathKind { Pen, Lining };
+
+inline constexpr double kDefaultLiningWidth = 8.0;
+inline const QColor kDefaultLiningFillColor(Qt::black);
+inline const QColor kDefaultPenFillColor(Qt::white);
 
 struct ContourPoint {
     QPointF position;
@@ -27,7 +32,17 @@ struct ContourData {
     bool closed = false;
     bool cutoutClosed = true;
     bool fillMask = false;
+    ContourPathKind pathKind = ContourPathKind::Pen;
+    double strokeWidth = kDefaultLiningWidth;
     bool operator==(const ContourData &) const = default;
 };
+
+inline QColor contourFillColor(const ContourData &data) {
+    if (data.fillColor.has_value() && data.fillColor->isValid()) {
+        return *data.fillColor;
+    }
+
+    return data.pathKind == ContourPathKind::Lining ? kDefaultLiningFillColor : kDefaultPenFillColor;
+}
 
 } // namespace fls::scene

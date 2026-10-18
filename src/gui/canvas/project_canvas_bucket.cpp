@@ -394,7 +394,7 @@ bool ProjectCanvas::commitBucketPreview(const QPointF &screenPoint,
         return false;
     }
 
-    penFigureId_.clear();
+    releaseSavedFigure();
     penDraft_.reset();
     beginPathEdit(pen_);
     pen_.points = std::move(worldLoops.front().points);

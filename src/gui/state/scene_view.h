@@ -58,7 +58,12 @@ inline QRectF sceneLocalRect(const QSizeF &size) {
 }
 
 inline QPainterPath contourFigurePath(const fls::scene::ContourFigure &figure) {
-    QPainterPath path = penPath(figure.data.points, figure.data.closed);
+    auto points = figure.data.points;
+    if (figure.data.pathKind == fls::scene::ContourPathKind::Lining && !points.isEmpty()) {
+        points.front().kind = points.back().kind = PenPointKind::Hard;
+    }
+    QPainterPath path = penPath(points,
+        figure.data.pathKind == fls::scene::ContourPathKind::Pen && figure.data.closed);
 
     path.setFillRule(Qt::OddEvenFill);
     for (int index = 0; index < figure.data.cutouts.size(); ++index) {
@@ -69,9 +74,37 @@ inline QPainterPath contourFigurePath(const fls::scene::ContourFigure &figure) {
     return path;
 }
 
+inline QColor contourOutlineStrokeColor(const QColor &color) {
+    constexpr int kDarkColorThreshold = 128;
+
+    return qGray(color.rgb()) < kDarkColorThreshold ? QColor(Qt::white) : QColor(Qt::black);
+}
+
+inline void paintContourOutline(QPainter &painter, const QPainterPath &path, const QColor &color) {
+    constexpr double kOutlineWidth = 2.0;
+    constexpr double kStrokeWidth = 4.0;
+    QPen stroke(contourOutlineStrokeColor(color), kStrokeWidth);
+    QPen outline(color, kOutlineWidth);
+
+    stroke.setCosmetic(true);
+    outline.setCosmetic(true);
+    painter.strokePath(path, stroke);
+    painter.strokePath(path, outline);
+}
+
 inline QRectF sceneLocalRect(const fls::scene::Layer &node, const ShapeGeometryStore &geometry) {
     if (node.kind() == fls::scene::LayerKind::Contour) {
-        return contourFigurePath(static_cast<const fls::scene::ContourFigure &>(node)).boundingRect();
+        const auto &figure = static_cast<const fls::scene::ContourFigure &>(node);
+        QRectF bounds = contourFigurePath(figure).boundingRect();
+        if (figure.data.pathKind == fls::scene::ContourPathKind::Lining) {
+            double width = figure.data.strokeWidth;
+            for (const auto &point : figure.data.points) {
+                width = std::max(width, point.strokeWidth);
+            }
+            bounds.adjust(-width * 0.5, -width * 0.5, width * 0.5, width * 0.5);
+        }
+
+        return bounds;
     }
     return sceneLocalRect(sceneNodeSize(node, geometry));
 }

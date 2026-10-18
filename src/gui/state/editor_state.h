@@ -76,6 +76,7 @@ public:
     void setModified(bool modified);
 
     QVector<fls::scene::Shape *> selectedLayers();
+    QVector<fls::scene::ContourFigure *> selectedContours();
     QVector<fls::scene::GuideLayer *> selectedGuideLayers();
     QVector<fls::scene::Group *> selectedGroups(const QVector<QString> &entryIds);
     bool isLayerLocked(const QString &layerId) const;

@@ -28,7 +28,8 @@ public:
     void setLayers(const QVector<fls::scene::Shape *> &layers);
     void setSelection(const QVector<fls::scene::Shape *> &layers,
                       const QVector<fls::scene::GuideLayer *> &guides,
-                      const QVector<fls::scene::Group *> &groups);
+                      const QVector<fls::scene::Group *> &groups,
+                      const QVector<fls::scene::ContourFigure *> &contours = {});
     void refreshTransformFields();
     void refreshTransformFieldsFromBox(const QPointF &center,
                                        double width,
@@ -71,6 +72,7 @@ private:
     void setBoxProxyFields(bool neutralTransformValues = true);
     QPointF selectionBoxCenter() const;
     void applyBoxTransform(const QString &property, double fromValue, double toValue);
+    void setSelectionColor(const std::array<quint8, 4> &color);
     void pickColor();
     void updateColorButton();
     QVector<std::array<quint8, 4>> selectionColors(bool colorableOnly) const;
@@ -83,6 +85,7 @@ private:
     QVector<fls::scene::Shape *> layers_;
     QVector<fls::scene::GuideLayer *> guides_;
     QVector<fls::scene::Group *> groups_;
+    QVector<fls::scene::ContourFigure *> contours_;
     bool loading_ = false;
     bool applyingChange_ = false;
     QHash<QWidget *, double> baselines_;

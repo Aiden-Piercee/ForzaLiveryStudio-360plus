@@ -41,7 +41,8 @@ void ProjectCanvas::drawContourFigures(QPainter &painter) {
     painter.setBrush(Qt::NoBrush);
     for (const SceneRenderEntry &entry : state_->renderEntries()) {
         if (entry.kind != fls::scene::LayerKind::Contour || !isSectionActive(entry.sectionGroupId)
-            || (entry.nodeId == penFigureId_ && tool_ == QStringLiteral("pen"))) {
+            || (entry.nodeId == pathFigureId_ && (pathFigureKind_ == fls::scene::ContourPathKind::Lining
+                ? tool_ == QStringLiteral("lining") : tool_ == QStringLiteral("pen")))) {
             continue;
         }
         const auto &figure = static_cast<const fls::scene::ContourFigure &>(*entry.node);
@@ -55,20 +56,15 @@ void ProjectCanvas::drawContourFigures(QPainter &painter) {
             continue;
         }
         painter.setOpacity(figure.opacity);
-        painter.setPen(QPen(QColor(65, 175, 245), 1.5, Qt::DashLine));
-        painter.drawPath((entry.worldTransform * camera_.matrix()).map(contourFigurePath(figure)));
+        paintContourOutline(painter, (entry.worldTransform * camera_.matrix()).map(contourFigurePath(figure)),
+                            fls::scene::contourFillColor(figure.data));
     }
     painter.restore();
 }
 
 void ProjectCanvas::drawPenOverlay(QPainter &painter) {
-    if (!penFigureId_.isEmpty() && state_ != nullptr) {
-        const auto *figure = state_->sceneNode(penFigureId_);
-        for (const fls::scene::Layer *node = figure; node != nullptr; node = node->parent()) {
-            if (!node->visible) {
-                return;
-            }
-        }
+    if (!pathFigureVisible(pen_)) {
+        return;
     }
     const bool showPendingBucketContour =
         tool_ == QStringLiteral("bucket") && !pen_.points.isEmpty();
@@ -127,10 +123,13 @@ void ProjectCanvas::drawPenOverlay(QPainter &painter) {
     const QPainterPath screenPath = closed
         ? penScreenPath()
         : camera_.matrix().map(worldPath);
-    QColor fill(83, 164, 255, closed ? 50 : 25);
-    QPen halo(QColor(15, 17, 20, 230), 4.0);
+    const QColor color = pen_.fillColor.has_value() && pen_.fillColor->isValid()
+        ? *pen_.fillColor : QColor(83, 164, 255);
+    QColor fill = color;
+    fill.setAlpha(closed ? 50 : 25);
+    QPen halo(contourOutlineStrokeColor(color), 4.0);
     halo.setCosmetic(true);
-    QPen pathPen(pen_.error.isEmpty() ? QColor(83, 164, 255) : QColor(235, 78, 78), 2.0);
+    QPen pathPen(pen_.error.isEmpty() ? color : QColor(235, 78, 78), 2.0);
     pathPen.setCosmetic(true);
     const auto drawFilledPath = [&](const QPainterPath &path) {
         painter.setPen(halo);
@@ -230,7 +229,7 @@ QPainterPath ProjectCanvas::liningPreviewPath() const {
 }
 
 void ProjectCanvas::drawLiningOverlay(QPainter &painter) {
-    if (tool_ != QStringLiteral("lining") && !lining_.fillRunning) {
+    if (!pathFigureVisible(lining_) || (tool_ != QStringLiteral("lining") && !lining_.fillRunning)) {
         return;
     }
     painter.save();
@@ -259,20 +258,23 @@ void ProjectCanvas::drawLiningOverlay(QPainter &painter) {
     }
     auto previewPoints = lining_.points;
     if (!lining_.closed)
-        previewPoints.push_back({lining_.hoverWorld, PenPointKind::Hard, {}, {}, false, liningWidth_});
-    const QPainterPath ribbon = buildLiningRibbon(buildLiningStroke(previewPoints, liningWidth_));
+        previewPoints.push_back({lining_.hoverWorld, PenPointKind::Hard, {}, {}, false, lining_.strokeWidth});
+    const QPainterPath ribbon = buildLiningRibbon(buildLiningStroke(previewPoints, lining_.strokeWidth));
     const QPainterPath screenRibbon = camera_.matrix().map(ribbon);
     const QPainterPath screenCenterline = camera_.matrix().map(centerline);
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(255, 200, 50, lining_.closed ? 55 : 35));
+    const QColor color = lining_.fillColor.value_or(fls::scene::kDefaultLiningFillColor);
+    QColor ribbonColor = color;
+    ribbonColor.setAlpha(lining_.closed ? 55 : 35);
+    painter.setBrush(ribbonColor);
     painter.drawPath(screenRibbon);
 
-    QPen halo(QColor(15, 17, 20, 230), 4.0);
+    QPen halo(contourOutlineStrokeColor(color), 4.0);
     halo.setCosmetic(true);
     painter.setPen(halo);
     painter.setBrush(Qt::NoBrush);
     painter.drawPath(screenCenterline);
-    QPen centerPen(lining_.error.isEmpty() ? QColor(255, 200, 50) : QColor(235, 78, 78), 2.0);
+    QPen centerPen(lining_.error.isEmpty() ? color : QColor(235, 78, 78), 2.0);
     centerPen.setCosmetic(true);
     painter.setPen(centerPen);
     painter.drawPath(screenCenterline);

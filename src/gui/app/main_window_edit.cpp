@@ -322,7 +322,9 @@ void MainWindow::startLiningFill(const QVector<PenPoint> &points,
         }
         return;
     }
-    prepareGeneratedFill(fillColor, QStringLiteral("Lining fill"), QStringLiteral("lining"));
+    prepareGeneratedFill(fillColor.has_value() && fillColor->isValid()
+                             ? fillColor : std::optional<QColor>(fls::scene::kDefaultLiningFillColor),
+                         QStringLiteral("Lining fill"), QStringLiteral("lining"));
 
     QString catalogError;
     const auto primitives = canvas_->thinFillPrimitives(&catalogError);
@@ -861,7 +863,7 @@ void MainWindow::refreshSelectionProperties() {
         return;
     }
     ScopedPerf perf("refreshSelectionProperties");
-    properties_->setSelection(state_->selectedLayers(), state_->selectedGuideLayers(), selectedGroups());
+    properties_->setSelection(state_->selectedLayers(), state_->selectedGuideLayers(), selectedGroups(), state_->selectedContours());
     refreshPropertyBoxFieldsFromCanvas();
 }
 

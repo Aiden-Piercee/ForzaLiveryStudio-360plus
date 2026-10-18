@@ -29,6 +29,7 @@ using namespace mw_detail;
 void MainWindow::setupCanvas() {
     canvas_ = new ProjectCanvas(this);
     canvas_->setEditorState(state_);
+    canvas_->setPathProjectRequestedCallback([this]() { return ensureProjectForInsertion(); });
     canvas_->setTransformRelativeMode(loadTransformModeSettings().relativeMode);
     QString geometryError;
     if (!canvas_->loadGeometry(&geometryError)) {
@@ -119,9 +120,12 @@ void MainWindow::setupTreeView() {
         updateSelectionFromTree();
     });
     connect(tree_, &QTreeView::clicked, this, [this](const QModelIndex &index) {
-        if (index.data(LayerTreeModel::IsContourRole).toBool()
-            && tree_->selectionModel()->selectedRows().size() == 1) {
-            canvas_->setTool(QStringLiteral("pen"));
+        const auto *figure = dynamic_cast<const fls::scene::ContourFigure *>(
+            state_->sceneNode(index.data(LayerTreeModel::EntryIdRole).toString()));
+
+        if (figure != nullptr && tree_->selectionModel()->selectedRows().size() == 1) {
+            canvas_->setTool(figure->data.pathKind == fls::scene::ContourPathKind::Lining
+                ? QStringLiteral("lining") : QStringLiteral("pen"));
         }
     });
     connect(tree_, &LayerTreeView::leewayGroupRequested,
@@ -423,14 +427,14 @@ void MainWindow::setupEditMenu() {
                  QStringLiteral("ToolbarSelect.xpm"), &MainWindow::fitViewToVisibleArea);
 
     editMenu->addSeparator();
-    auto *saveContour = editMenu->addAction(QStringLiteral("Save Pen Contour as Figure"));
-    registerShortcutAction(saveContour, QStringLiteral("save_pen_figure"), QStringLiteral("Save Pen Contour as Figure"));
+    auto *saveContour = editMenu->addAction(QStringLiteral("Save Pen or Lining Path as Figure"));
+    registerShortcutAction(saveContour, QStringLiteral("save_pen_figure"), QStringLiteral("Save Pen or Lining Path as Figure"));
     addAction(saveContour);
     connect(saveContour, &QAction::triggered, this, [this]() {
-        if (canvas_->savePenFigure()) {
+        if (canvas_->savePathFigure()) {
             statusBar()->showMessage(QStringLiteral("Contour figure saved in Layers"), 2500);
         } else {
-            statusBar()->showMessage(QStringLiteral("Draw a Pen contour with at least two anchors in an open project"), 4000);
+            statusBar()->showMessage(QStringLiteral("Draw a Pen or Lining path with at least two anchors in an open project"), 4000);
         }
     });
     auto *newContour = editMenu->addAction(QStringLiteral("New Pen Contour"));
@@ -565,6 +569,8 @@ void MainWindow::setupOptionsMenu() {
             action->setChecked(loadBehaviorSettings().contourFillMode == mode);
         });
     }
+    addBehaviorOption(optionsMenu, QStringLiteral("Automatically Save Pen and Lining Paths"),
+                      QStringLiteral("toggle_auto_save_paths"), &BehaviorSettings::autoSavePaths);
     addBehaviorOption(optionsMenu, QStringLiteral("Show Property Debug"), QStringLiteral("toggle_property_debug"), &BehaviorSettings::showPropertyDebug);
     addBehaviorOption(optionsMenu, QStringLiteral("Move Tool Auto-Select"), QStringLiteral("toggle_move_auto_select"), &BehaviorSettings::moveToolAutoSelect);
     addBehaviorOption(optionsMenu, QStringLiteral("Allow Move Outside Bounding Box"),

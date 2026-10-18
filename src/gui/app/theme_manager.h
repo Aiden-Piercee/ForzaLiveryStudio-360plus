@@ -40,6 +40,7 @@ struct BehaviorSettings {
     bool insertShapeWithLastSelectedColor = true;
     bool insertShapeWithLastSelectedScale = false;
     ContourFillMode contourFillMode = ContourFillMode::Analytic;
+    bool autoSavePaths = false;
     bool showPropertyDebug = false;
     bool moveToolAutoSelect = false;
     bool allowMoveOutsideBoundingBox = true;

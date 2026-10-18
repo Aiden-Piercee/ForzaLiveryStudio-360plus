@@ -497,9 +497,14 @@ void EditorState::setGroupDescendantMask(const QString &groupId, bool mask) {
 
 void EditorState::setGroupDescendantColor(const QString &groupId, const std::array<quint8, 4> &color) {
     if (fls::scene::Group *group = groupForId(groupId)) {
-        walkShapes(*group, [&](fls::scene::Shape &shape) {
-            if (!shape.raster) {
-                shape.color = color;
+        walkGroup(*group, [&](fls::scene::Layer &node) {
+            if (node.kind() == fls::scene::LayerKind::Shape) {
+                auto &shape = static_cast<fls::scene::Shape &>(node);
+                if (!shape.raster) {
+                    shape.color = color;
+                }
+            } else if (node.kind() == fls::scene::LayerKind::Contour && !isLayerLocked(node.id)) {
+                static_cast<fls::scene::ContourFigure &>(node).data.fillColor = QColor(color[2], color[1], color[0], color[3]);
             }
         });
     }

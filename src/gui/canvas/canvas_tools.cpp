@@ -309,7 +309,7 @@ QString PenTool::name() const {
 bool PenTool::handlePress(QMouseEvent *event) {
     if ((event->button() != Qt::LeftButton && event->button() != Qt::RightButton)
         || canvas_.pen_.fillRunning
-        || !canvas_.penFigureEditable()) {
+        || !canvas_.pathFigureEditable(canvas_.pen_)) {
         return false;
     }
     ProjectCanvas &c = canvas_;
@@ -492,7 +492,7 @@ bool PenTool::handleRelease(QMouseEvent *event) {
 
 bool PenTool::handleDoubleClick(QMouseEvent *event) {
     if (event->button() != Qt::LeftButton || canvas_.pen_.fillRunning
-        || !canvas_.penFigureEditable()) {
+        || !canvas_.pathFigureEditable(canvas_.pen_)) {
         return false;
     }
     ProjectCanvas &c = canvas_;
@@ -555,7 +555,7 @@ QString LiningTool::name() const {
 
 bool LiningTool::handlePress(QMouseEvent *event) {
     if ((event->button() != Qt::LeftButton && event->button() != Qt::RightButton)
-        || canvas_.lining_.fillRunning) {
+        || canvas_.lining_.fillRunning || !canvas_.pathFigureEditable(canvas_.lining_)) {
         return false;
     }
     ProjectCanvas &c = canvas_;
@@ -565,7 +565,7 @@ bool LiningTool::handlePress(QMouseEvent *event) {
     if (widthHit.valid()) {
         c.beginPathEdit(c.lining_);
         if (event->button() == Qt::RightButton) {
-            c.lining_.points[widthHit.pointIndex].strokeWidth = c.liningWidth_;
+            c.lining_.points[widthHit.pointIndex].strokeWidth = c.lining_.strokeWidth;
             c.commitPathEdit(c.lining_);
         } else {
             c.lining_.dragPoint = widthHit.pointIndex;
@@ -621,8 +621,8 @@ bool LiningTool::handlePress(QMouseEvent *event) {
                 const double beforeDistance = QLineF(before.position, position).length();
                 const double afterDistance = QLineF(after.position, position).length();
                 const double fraction = beforeDistance / std::max(beforeDistance + afterDistance, 1e-8);
-                const double width = liningPointWidth(before, c.liningWidth_) * (1.0 - fraction)
-                    + liningPointWidth(after, c.liningWidth_) * fraction;
+                const double width = liningPointWidth(before, c.lining_.strokeWidth) * (1.0 - fraction)
+                    + liningPointWidth(after, c.lining_.strokeWidth) * fraction;
                 c.lining_.points.insert(insertIndex, {position, PenPointKind::Soft, {}, {}, false, width});
                 c.validateLiningInteraction();
             }
@@ -657,7 +657,7 @@ bool LiningTool::handlePress(QMouseEvent *event) {
     c.beginPathEdit(c.lining_);
     c.lining_.points.push_back({world,
                                c.lining_.points.isEmpty() ? PenPointKind::Hard : PenPointKind::Soft,
-                               {}, {}, false, c.liningWidth_});
+                               {}, {}, false, c.lining_.strokeWidth});
     c.lining_.hoverWorld = world;
     c.lining_.error.clear();
     c.commitPathEdit(c.lining_);
@@ -693,7 +693,7 @@ bool LiningTool::handleWheel(QWheelEvent *event) {
         : angle.x() != 0 ? angle.x()
         : pixels.y() != 0 ? pixels.y()
         : pixels.x();
-    if (raw == 0 || canvas_.lining_.fillRunning) {
+    if (raw == 0 || canvas_.lining_.fillRunning || !canvas_.pathFigureEditable(canvas_.lining_)) {
         event->accept();
         return true;
     }
@@ -725,7 +725,7 @@ bool LiningTool::handleRelease(QMouseEvent *event) {
 }
 
 bool LiningTool::handleDoubleClick(QMouseEvent *event) {
-    if (event->button() != Qt::LeftButton || canvas_.lining_.fillRunning) {
+    if (event->button() != Qt::LeftButton || canvas_.lining_.fillRunning || !canvas_.pathFigureEditable(canvas_.lining_)) {
         return false;
     }
     ProjectCanvas &c = canvas_;
@@ -741,7 +741,7 @@ bool LiningTool::handleDoubleClick(QMouseEvent *event) {
         c.lining_.points.back().position = world;
         c.lining_.points.back().kind = PenPointKind::Hard;
     } else {
-        c.lining_.points.push_back({world, PenPointKind::Hard, {}, {}, false, c.liningWidth_});
+        c.lining_.points.push_back({world, PenPointKind::Hard, {}, {}, false, c.lining_.strokeWidth});
     }
     c.lining_.hoverWorld = world;
     c.lining_.error.clear();

@@ -21,6 +21,8 @@ PathInteractionState capturePathState(const PathInteraction &path) {
         path.closed,
         path.cutoutClosed,
         path.fillMask,
+        path.pathKind,
+        path.strokeWidth,
     };
     state.cutouts.detach();
     return state;
@@ -48,7 +50,31 @@ PathInteractionState transformedPathState(PathInteractionState state, const QTra
         }
     };
 
-    transformPoints(state.points, state.closed);
+    if (state.pathKind == fls::scene::ContourPathKind::Lining) {
+        const auto segments = penSegments(state.points, false);
+        const double determinant = std::abs(transform.determinant());
+        const double widthScale = std::sqrt(determinant);
+        for (int pointIndex = 0; pointIndex < state.points.size(); ++pointIndex) {
+            QPointF tangent;
+            for (int segmentIndex : {pointIndex - 1, pointIndex}) {
+                if (segmentIndex >= 0 && segmentIndex < segments.size()) {
+                    const QPointF direction = segments[segmentIndex].derivative(segmentIndex == pointIndex ? 0.0 : 1.0);
+                    const double length = QLineF({}, direction).length();
+                    if (length > 0.0) {
+                        tangent += direction / length;
+                    }
+                }
+            }
+            const double length = QLineF({}, tangent).length();
+            const double mappedLength = length > 0.0
+                ? QLineF(transform.map(QPointF()), transform.map(tangent / length)).length() : 0.0;
+            auto &point = state.points[pointIndex];
+            point.strokeWidth = liningPointWidth(point, state.strokeWidth)
+                * (mappedLength > 0.0 ? determinant / mappedLength : widthScale);
+        }
+        state.strokeWidth *= widthScale;
+    }
+    transformPoints(state.points, state.pathKind == fls::scene::ContourPathKind::Pen && state.closed);
     for (int index = 0; index < state.cutouts.size(); ++index) {
         transformPoints(state.cutouts[index], state.cutoutClosed || index + 1 < state.cutouts.size());
     }
@@ -57,7 +83,8 @@ PathInteractionState transformedPathState(PathInteractionState state, const QTra
 }
 
 bool pathStatesEqual(const PathInteractionState &left, const PathInteractionState &right) {
-    if (left.closed != right.closed
+    if (left.pathKind != right.pathKind || left.strokeWidth != right.strokeWidth
+        || left.closed != right.closed
         || left.fillMask != right.fillMask
         || left.fillColor != right.fillColor
         || left.cutoutClosed != right.cutoutClosed
@@ -94,6 +121,8 @@ void restorePathState(PathInteraction &path, const PathInteractionState &state) 
     path.cutoutClosed = state.cutoutClosed;
     path.activeCutout = path.cutouts.isEmpty() ? -1 : path.cutouts.size() - 1;
     path.fillMask = state.fillMask;
+    path.pathKind = state.pathKind;
+    path.strokeWidth = state.strokeWidth;
 }
 
 } // namespace
@@ -158,10 +187,11 @@ void ProjectCanvas::setEditorState(EditorState *state) {
     }
     state_ = state;
     if (state_ != nullptr) {
-        connect(state_, &EditorState::selectionChanged, this, &ProjectCanvas::syncPenFigureSelection);
-        connect(state_, &EditorState::projectGeometryChanged, this, &ProjectCanvas::reloadPenFigure);
-        connect(state_, &EditorState::projectStructureChanged, this, &ProjectCanvas::syncPenFigureSelection);
-        connect(state_, &EditorState::transformLiveChanged, this, &ProjectCanvas::reloadPenFigure);
+        connect(state_, &EditorState::selectionChanged, this, &ProjectCanvas::syncPathFigureSelection);
+        connect(state_, &EditorState::projectGeometryChanged, this, &ProjectCanvas::reloadPathFigure);
+        connect(state_, &EditorState::canvasRepaintRequested, this, &ProjectCanvas::reloadPathFigure);
+        connect(state_, &EditorState::projectStructureChanged, this, &ProjectCanvas::syncPathFigureSelection);
+        connect(state_, &EditorState::transformLiveChanged, this, &ProjectCanvas::reloadPathFigure);
     }
     setProject(state_ == nullptr ? nullptr : state_->project());
 }
@@ -698,8 +728,16 @@ void ProjectCanvas::cancelPathInteraction(PathInteraction &path, const std::func
 
 void ProjectCanvas::discardPathInteraction(PathInteraction &path,
                                            const std::function<void()> &cancelCallback) {
-    if (&path == &pen_ && !penFigureId_.isEmpty()) {
-        startNewPenContour();
+    if (isSavedFigurePath(path)) {
+        commitPathEdit(path);
+        if (&path == &pen_) {
+            cancelPenInteraction();
+        } else {
+            cancelLiningInteraction();
+        }
+        if (state_ != nullptr) {
+            state_->clearSelection();
+        }
         return;
     }
     const bool wasRunning = path.fillRunning;
@@ -707,7 +745,8 @@ void ProjectCanvas::discardPathInteraction(PathInteraction &path,
     path.points.clear();
     path.cutouts.clear();
     path.crossings.clear();
-    path.fillColor.reset();
+    path.fillColor = path.pathKind == fls::scene::ContourPathKind::Lining
+        ? std::optional<QColor>(fls::scene::kDefaultLiningFillColor) : std::nullopt;
     path.fillMask = false;
     path.error.clear();
     path.fillMessage.clear();
@@ -735,8 +774,8 @@ void ProjectCanvas::commitPathEdit(PathInteraction &path) {
         return;
     }
     if (!pathStatesEqual(*path.pendingEdit, capturePathState(path))) {
-        if (&path == &pen_ && !penFigureId_.isEmpty()) {
-            storePenFigure();
+        if (isSavedFigurePath(path)) {
+            storePathFigure();
         } else {
             path.undoStack.push_back(std::move(*path.pendingEdit));
             path.redoStack.clear();
@@ -772,6 +811,9 @@ void ProjectCanvas::refreshPathAfterHistory(PathInteraction &path) {
         refreshPenInteractionHint(cursorPoint, QGuiApplication::keyboardModifiers());
     } else {
         validateLiningInteraction();
+        if (liningWidthChangedCallback_ != nullptr) {
+            liningWidthChangedCallback_(lining_.strokeWidth);
+        }
         refreshLiningInteractionHint(cursorPoint, QGuiApplication::keyboardModifiers());
     }
     updateCursorForPoint(cursorPoint);
@@ -822,27 +864,62 @@ void ProjectCanvas::setPenFillRunning(bool running, const QString &message) {
 }
 
 void ProjectCanvas::cancelPenInteraction() {
-    penFigureId_.clear();
+    if (isSavedFigurePath(pen_)) {
+        pathFigureId_.clear();
+    }
     penDraft_.reset();
     cancelPathInteraction(pen_, penFillCancelCallback_);
 }
 
-bool ProjectCanvas::savePenFigure() {
-    if (state_ == nullptr || !state_->hasProject() || pen_.points.size() < 2
-        || pen_.fillRunning || tool_ != QStringLiteral("pen")) {
+PathInteraction &ProjectCanvas::savedFigurePath() {
+
+    return pathFigureKind_ == fls::scene::ContourPathKind::Lining ? lining_ : pen_;
+}
+
+bool ProjectCanvas::isSavedFigurePath(const PathInteraction &path) const {
+
+    return !pathFigureId_.isEmpty() && path.pathKind == pathFigureKind_;
+}
+
+void ProjectCanvas::setPathProjectRequestedCallback(std::function<bool()> callback) {
+    pathProjectRequestedCallback_ = std::move(callback);
+}
+
+bool ProjectCanvas::savePathFigure(bool selectFigure) {
+    if (state_ == nullptr
+        || (tool_ != QStringLiteral("pen") && tool_ != QStringLiteral("lining"))) {
         return false;
     }
-    commitPathEdit(pen_);
-    if (!penFigureId_.isEmpty()) {
+    PathInteraction &path = tool_ == QStringLiteral("lining") ? lining_ : pen_;
+    if (path.points.size() < 2 || path.fillRunning || !pathFigureEditable(path)) {
+        return false;
+    }
+    if (!state_->hasProject()) {
+        const PathInteractionState draft = capturePathState(path);
+        const QString pathTool = tool_;
+        if (pathProjectRequestedCallback_ == nullptr || !pathProjectRequestedCallback_() || !state_->hasProject()) {
+            return false;
+        }
+        restorePathState(path, draft);
+        setTool(pathTool);
+    }
+    commitPathEdit(path);
+    if (isSavedFigurePath(path)) {
+        if (selectFigure) {
+            state_->setSelectionFromEntries({pathFigureId_}, {}, {pathFigureId_});
+        }
         return true;
     }
     auto figure = std::make_unique<fls::scene::ContourFigure>();
     const QString id = QStringLiteral("contour_%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
 
     figure->id = id;
-    figure->name = QStringLiteral("Pen contour");
-    figure->data = capturePathState(pen_);
-    syncingPenFigure_ = true;
+    figure->name = path.pathKind == fls::scene::ContourPathKind::Lining
+        ? QStringLiteral("Lining path") : QStringLiteral("Pen contour");
+    figure->data = capturePathState(path);
+    figure->data.fillColor = fls::scene::contourFillColor(figure->data);
+    releaseSavedFigure();
+    syncingPathFigure_ = true;
     state_->beginProjectEdit();
     state_->insertLayerAboveSelection(std::move(figure), state_->selectedTransformTargetIds());
     auto *inserted = static_cast<fls::scene::ContourFigure *>(state_->sceneNode(id));
@@ -851,19 +928,22 @@ bool ProjectCanvas::savePenFigure() {
 
     if (!invertible) {
         state_->cancelProjectEdit();
-        syncingPenFigure_ = false;
+        syncingPathFigure_ = false;
         return false;
     }
     inserted->data = transformedPathState(std::move(inserted->data), inverse);
-    penFigureId_ = id;
-    penDraft_.reset();
-    pen_.undoStack.clear();
-    pen_.redoStack.clear();
-    state_->setSelectionFromEntries({id}, {}, {id});
+    pathFigureId_ = id;
+    pathFigureKind_ = path.pathKind;
+    (path.pathKind == fls::scene::ContourPathKind::Lining ? liningDraft_ : penDraft_).reset();
+    path.undoStack.clear();
+    path.redoStack.clear();
+    if (selectFigure) {
+        state_->setSelectionFromEntries({id}, {}, {id});
+    }
     state_->commitProjectEdit();
     state_->noteProjectStructureChanged();
-    syncingPenFigure_ = false;
-    reloadPenFigure();
+    syncingPathFigure_ = false;
+    reloadPathFigure();
 
     return true;
 }
@@ -877,8 +957,8 @@ void ProjectCanvas::startNewPenContour() {
     setTool(QStringLiteral("pen"));
 }
 
-void ProjectCanvas::syncPenFigureSelection() {
-    if (syncingPenFigure_ || state_ == nullptr) {
+void ProjectCanvas::syncPathFigureSelection() {
+    if (syncingPathFigure_ || state_ == nullptr) {
         return;
     }
     const QSet<QString> selected = state_->selectedLayerIds();
@@ -888,87 +968,112 @@ void ProjectCanvas::syncPenFigureSelection() {
         ? dynamic_cast<const fls::scene::ContourFigure *>(state_->sceneNode(*selected.constBegin())) : nullptr;
     const QString nextId = figure != nullptr ? figure->id : QString();
 
-    if (nextId == penFigureId_) {
-        reloadPenFigure();
+    if (nextId == pathFigureId_) {
+        reloadPathFigure();
         return;
     }
-    commitPathEdit(pen_);
-    if (pen_.fillRunning && penFillCancelCallback_ != nullptr) {
-        penFillCancelCallback_();
-    }
-    if (!penFigureId_.isEmpty()) {
-        pen_.reset();
-        if (figure == nullptr && penDraft_.has_value()) {
-            restorePathState(pen_, *penDraft_);
-            penDraft_.reset();
-        }
-    } else if (figure != nullptr) {
-        penDraft_ = capturePathState(pen_);
-    }
-    penFigureId_ = nextId;
-    invalidatePenGeometryCache();
+    releaseSavedFigure();
     if (figure != nullptr) {
-        reloadPenFigure();
-        setTool(QStringLiteral("pen"));
+        pathFigureKind_ = figure->data.pathKind;
+        PathInteraction &path = savedFigurePath();
+        commitPathEdit(path);
+        (pathFigureKind_ == fls::scene::ContourPathKind::Lining ? liningDraft_ : penDraft_) = capturePathState(path);
+        pathFigureId_ = nextId;
+        reloadPathFigure();
+        setTool(pathFigureKind_ == fls::scene::ContourPathKind::Lining ? QStringLiteral("lining") : QStringLiteral("pen"));
     }
+    invalidatePenGeometryCache();
     update();
 }
 
-void ProjectCanvas::reloadPenFigure() {
-    if (syncingPenFigure_ || penFigureId_.isEmpty() || state_ == nullptr
-        || pen_.pendingEdit.has_value() || pen_.fillRunning) {
+void ProjectCanvas::releaseSavedFigure() {
+    if (pathFigureId_.isEmpty()) {
         return;
     }
-    const auto *figure = dynamic_cast<const fls::scene::ContourFigure *>(state_->sceneNode(penFigureId_));
+    PathInteraction &previous = savedFigurePath();
+    auto &draft = pathFigureKind_ == fls::scene::ContourPathKind::Lining ? liningDraft_ : penDraft_;
+    const auto &cancel = pathFigureKind_ == fls::scene::ContourPathKind::Lining
+        ? liningFillCancelCallback_ : penFillCancelCallback_;
+
+    commitPathEdit(previous);
+    if (previous.fillRunning && cancel != nullptr) {
+        cancel();
+    }
+    previous.reset();
+    if (draft.has_value()) {
+        restorePathState(previous, *draft);
+        draft.reset();
+    }
+    if (previous.pathKind == fls::scene::ContourPathKind::Lining && liningWidthChangedCallback_ != nullptr) {
+        liningWidthChangedCallback_(previous.strokeWidth);
+    }
+    pathFigureId_.clear();
+}
+
+void ProjectCanvas::reloadPathFigure() {
+    if (syncingPathFigure_ || pathFigureId_.isEmpty() || state_ == nullptr) {
+        return;
+    }
+    PathInteraction &path = savedFigurePath();
+    if (path.pendingEdit.has_value() || path.fillRunning) {
+        return;
+    }
+    const auto *figure = dynamic_cast<const fls::scene::ContourFigure *>(state_->sceneNode(pathFigureId_));
     if (figure == nullptr) {
-        syncPenFigureSelection();
+        syncPathFigureSelection();
         return;
     }
     PathInteractionState data = figure->data;
     const QTransform world = sceneWorldTransform(*figure);
 
-    restorePathState(pen_, transformedPathState(std::move(data), world));
-    pen_.undoStack.clear();
-    pen_.redoStack.clear();
+    data.fillColor = fls::scene::contourFillColor(data);
+    restorePathState(path, transformedPathState(std::move(data), world));
+    path.undoStack.clear();
+    path.redoStack.clear();
     invalidatePenGeometryCache();
-    refreshPathAfterHistory(pen_);
+    refreshPathAfterHistory(path);
 }
 
-void ProjectCanvas::storePenFigure() {
-    auto *figure = dynamic_cast<fls::scene::ContourFigure *>(state_->sceneNode(penFigureId_));
-    PathInteractionState data = capturePathState(pen_);
+void ProjectCanvas::storePathFigure() {
+    auto *figure = dynamic_cast<fls::scene::ContourFigure *>(state_->sceneNode(pathFigureId_));
+    PathInteractionState data = capturePathState(savedFigurePath());
     bool invertible = false;
     const QTransform inverse = figure != nullptr
         ? sceneWorldTransform(*figure).inverted(&invertible) : QTransform();
 
-    if (figure == nullptr || state_->isLayerLocked(penFigureId_) || !invertible) {
+    if (figure == nullptr || state_->isLayerLocked(pathFigureId_) || !invertible) {
         return;
     }
     data = transformedPathState(std::move(data), inverse);
-    syncingPenFigure_ = true;
+    syncingPathFigure_ = true;
     state_->beginProjectEdit();
     figure->data = std::move(data);
     state_->commitProjectEdit();
-    state_->noteProjectGeometryChanged(true, {penFigureId_});
-    syncingPenFigure_ = false;
+    state_->noteProjectGeometryChanged(true, {pathFigureId_});
+    syncingPathFigure_ = false;
 }
 
-bool ProjectCanvas::penFigureEditable() const {
-    if (penFigureId_.isEmpty()) {
+bool ProjectCanvas::pathFigureVisible(const PathInteraction &path) const {
+    if (!isSavedFigurePath(path) || state_ == nullptr) {
         return true;
     }
-    const auto *figure = state_ != nullptr ? state_->sceneNode(penFigureId_) : nullptr;
-    if (figure == nullptr || state_->isLayerLocked(penFigureId_)
-        || !sceneWorldTransform(*figure).isInvertible()) {
-        return false;
-    }
-    for (const fls::scene::Layer *node = figure; node != nullptr; node = node->parent()) {
+    for (const fls::scene::Layer *node = state_->sceneNode(pathFigureId_); node != nullptr; node = node->parent()) {
         if (!node->visible) {
             return false;
         }
     }
 
     return true;
+}
+
+bool ProjectCanvas::pathFigureEditable(const PathInteraction &path) const {
+    if (!isSavedFigurePath(path)) {
+        return true;
+    }
+    const auto *figure = state_ != nullptr ? state_->sceneNode(pathFigureId_) : nullptr;
+
+    return figure != nullptr && !state_->isLayerLocked(pathFigureId_)
+        && sceneWorldTransform(*figure).isInvertible() && pathFigureVisible(path);
 }
 
 void ProjectCanvas::setLiningFillRequestedCallback(
@@ -998,36 +1103,40 @@ void ProjectCanvas::setLiningFillRunning(bool running, const QString &message) {
 }
 
 void ProjectCanvas::cancelLiningInteraction() {
+    if (isSavedFigurePath(lining_)) {
+        pathFigureId_.clear();
+    }
+    liningDraft_.reset();
     cancelPathInteraction(lining_, liningFillCancelCallback_);
 }
 
 void ProjectCanvas::setLiningWidth(double width) {
-    if (!std::isfinite(width) || width <= 0.0) {
+    if (!std::isfinite(width) || width <= 0.0 || !pathFigureEditable(lining_)) {
         return;
     }
     const double adjusted = std::clamp(width, kMinimumLiningWidth, kMaximumLiningWidth);
     const bool uniform = std::all_of(lining_.points.cbegin(), lining_.points.cend(), [&](const auto &point) {
-        return qFuzzyCompare(liningPointWidth(point, liningWidth_), adjusted);
+        return qFuzzyCompare(liningPointWidth(point, lining_.strokeWidth), adjusted);
     });
-    if (qFuzzyCompare(liningWidth_, adjusted) && uniform) {
+    if (qFuzzyCompare(lining_.strokeWidth, adjusted) && uniform) {
         return;
     }
     if (!lining_.points.isEmpty())
         beginPathEdit(lining_);
-    liningWidth_ = adjusted;
+    lining_.strokeWidth = adjusted;
     for (auto &point : lining_.points)
         point.strokeWidth = adjusted;
     if (!lining_.points.isEmpty())
         commitPathEdit(lining_);
     validateLiningInteraction();
     if (liningWidthChangedCallback_ != nullptr) {
-        liningWidthChangedCallback_(liningWidth_);
+        liningWidthChangedCallback_(lining_.strokeWidth);
     }
     update();
 }
 
 double ProjectCanvas::liningWidth() const {
-    return liningWidth_;
+    return lining_.strokeWidth;
 }
 
 void ProjectCanvas::adjustLiningWidth(double delta, const QPointF &screenPoint) {
@@ -1035,16 +1144,19 @@ void ProjectCanvas::adjustLiningWidth(double delta, const QPointF &screenPoint) 
     if (hit.valid()) {
         beginPathEdit(lining_);
         auto &point = lining_.points[hit.pointIndex];
-        point.strokeWidth = std::clamp(liningPointWidth(point, liningWidth_) + delta, kMinimumLiningWidth, kMaximumLiningWidth);
+        point.strokeWidth = std::clamp(liningPointWidth(point, lining_.strokeWidth) + delta, kMinimumLiningWidth, kMaximumLiningWidth);
         commitPathEdit(lining_);
         refreshLiningInteractionHint(screenPoint, QGuiApplication::keyboardModifiers());
         return;
     }
-    setLiningWidth(liningWidth_ + delta);
+    setLiningWidth(lining_.strokeWidth + delta);
     refreshLiningInteractionHint(screenPoint, QGuiApplication::keyboardModifiers());
 }
 
 void ProjectCanvas::closePenPath() {
+    if (!pathFigureEditable(pen_)) {
+        return;
+    }
     const double worldPerPixel = camera_.worldPerPixel();
     const PenContour contour = buildPenContour(currentPenLoops(), worldPerPixel * 0.25);
     if (!contour.valid()) {
@@ -1059,6 +1171,11 @@ void ProjectCanvas::closePenPath() {
         pen_.error = QStringLiteral("Pen fill is unavailable");
         refreshPenInteractionHint(worldToScreen(pen_.hoverWorld),
                                   QGuiApplication::keyboardModifiers());
+        update();
+        return;
+    }
+    if (loadBehaviorSettings().autoSavePaths && !savePathFigure(false)) {
+        pen_.error = QStringLiteral("Could not save the Pen path before filling");
         update();
         return;
     }
@@ -1077,6 +1194,9 @@ void ProjectCanvas::closePenPath() {
 }
 
 void ProjectCanvas::requestLiningFill() {
+    if (!pathFigureEditable(lining_)) {
+        return;
+    }
     validateLiningInteraction();
     if (!lining_.error.isEmpty()) {
         refreshLiningInteractionHint(worldToScreen(lining_.hoverWorld),
@@ -1091,6 +1211,11 @@ void ProjectCanvas::requestLiningFill() {
         update();
         return;
     }
+    if (loadBehaviorSettings().autoSavePaths && !savePathFigure(false)) {
+        lining_.error = QStringLiteral("Could not save the Lining path before filling");
+        update();
+        return;
+    }
     const QVector<PenPoint> points = lining_.points;
     const std::optional<QColor> fillColor = lining_.fillColor;
     lining_.resetHover();
@@ -1099,7 +1224,7 @@ void ProjectCanvas::requestLiningFill() {
     lining_.fillRunning = true;
     lining_.fillMessage = QStringLiteral("Tracing lining path…");
     update();
-    liningFillRequestedCallback_(points, liningWidth_, fillColor);
+    liningFillRequestedCallback_(points, lining_.strokeWidth, fillColor);
 }
 
 void ProjectCanvas::refitView() {

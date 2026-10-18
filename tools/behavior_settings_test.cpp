@@ -21,6 +21,13 @@ int main(int argc, char **argv) {
         QSettings settings;
         const auto require = [](bool condition) { if (!condition) { throw std::runtime_error("Contour fill settings mismatch"); } };
         require(gui::loadBehaviorSettings().contourFillMode == gui::ContourFillMode::Analytic);
+        require(!gui::loadBehaviorSettings().autoSavePaths);
+        for (bool enabled : {true, false}) {
+            auto behavior = gui::loadBehaviorSettings();
+            behavior.autoSavePaths = enabled;
+            gui::saveBehaviorSettings(behavior);
+            require(gui::loadBehaviorSettings().autoSavePaths == enabled);
+        }
         settings.setValue(QStringLiteral("ui/behavior/contourFillMode"), QStringLiteral("catalog"));
         settings.sync();
         require(gui::loadBehaviorSettings().contourFillMode == gui::ContourFillMode::CompactFit);

@@ -556,7 +556,7 @@ QPointF ProjectCanvas::liningWidthNormal(int pointIndex) const {
 
 QPointF ProjectCanvas::liningWidthHandlePosition(int pointIndex, int side) const {
     const auto &point = lining_.points[pointIndex];
-    const double radius = liningPointWidth(point, liningWidth_) * 0.5
+    const double radius = liningPointWidth(point, lining_.strokeWidth) * 0.5
         + camera_.worldPerPixel() * kLiningWidthHandleOffsetPixels;
 
     return worldToScreen(point.position + liningWidthNormal(pointIndex) * (radius * side));
@@ -625,14 +625,14 @@ void ProjectCanvas::refreshLiningInteractionHint(const QPointF &screenPoint,
         lining_.hoverPoint = lining_.dragPoint >= 0 ? lining_.dragPoint : widthHit.pointIndex;
         lining_.hoverHandle = lining_.dragPoint >= 0 ? lining_.dragHandle : widthHit.handle;
         setCursorHint(screenPoint, {
-            QStringLiteral("Stroke width: %1").arg(liningPointWidth(lining_.points[lining_.hoverPoint], liningWidth_), 0, 'f', 2),
+            QStringLiteral("Stroke width: %1").arg(liningPointWidth(lining_.points[lining_.hoverPoint], lining_.strokeWidth), 0, 'f', 2),
             QStringLiteral("Drag: Adjust anchor width"), QStringLiteral("Wheel: Adjust anchor width"),
             QStringLiteral("RMB: Reset to toolbar width")});
         update();
         return;
     }
     if (!lining_.closed) {
-        QStringList lines{QStringLiteral("Width: %1").arg(liningWidth_, 0, 'f', 2)};
+        QStringList lines{QStringLiteral("Width: %1").arg(lining_.strokeWidth, 0, 'f', 2)};
         if (!lining_.points.isEmpty()) {
             lines.push_back(QStringLiteral("RMB: Complete path"));
             lines.push_back(QStringLiteral("Double LMB: Hard point"));
@@ -653,7 +653,7 @@ void ProjectCanvas::refreshLiningInteractionHint(const QPointF &screenPoint,
     if (lining_.hoverPoint < 0) {
         lining_.hoverCurve = liningCurveAtScreen(screenPoint);
     }
-    QStringList lines{QStringLiteral("Width: %1").arg(liningWidth_, 0, 'f', 2),
+    QStringList lines{QStringLiteral("Width: %1").arg(lining_.strokeWidth, 0, 'f', 2),
                       QStringLiteral("Press %1 to fill")
                           .arg(interactionShortcutText(KeyInteraction::CanvasCommitInteraction))};
     if (!lining_.error.isEmpty()) {

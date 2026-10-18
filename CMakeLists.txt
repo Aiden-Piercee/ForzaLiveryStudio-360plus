@@ -560,6 +560,9 @@ if(FLS_BUILD_TESTS)
     add_executable(fls_contour_figure_tests
         ${fls_contour_figure_moc}
         tools/contour_figure_test.cpp
+        src/gui/widgets/property_panel.cpp
+        src/gui/app/gui_assets.cpp
+        src/gui/app/theme_manager.cpp
         src/gui/state/editor_state.h
         src/gui/state/editor_state.cpp
         src/gui/state/editor_state_selection.cpp
@@ -569,8 +572,16 @@ if(FLS_BUILD_TESTS)
     )
     set_target_properties(fls_contour_figure_tests PROPERTIES AUTOMOC OFF AUTOUIC OFF)
     target_include_directories(fls_contour_figure_tests PRIVATE
-        src/gui/state src/gui/app src/gui/widgets src/gui/fill)
-    target_link_libraries(fls_contour_figure_tests PRIVATE fls_core Qt6::Gui)
+        src/gui/state src/gui/app src/gui/widgets src/gui/fill src/gui/canvas)
+    target_link_libraries(fls_contour_figure_tests PRIVATE fls_core Qt6::Widgets)
+    if(WIN32)
+        add_custom_command(TARGET fls_contour_figure_tests POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "$<TARGET_FILE_DIR:fls_contour_figure_tests>/platforms"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${Qt6_DIR}/../../Qt6/plugins/platforms/qminimal.dll"
+                "$<TARGET_FILE_DIR:fls_contour_figure_tests>/platforms/qminimal.dll")
+    endif()
     add_test(NAME contour_figure COMMAND fls_contour_figure_tests)
 
     add_executable(fls_guide_preprocess_metadata_tests

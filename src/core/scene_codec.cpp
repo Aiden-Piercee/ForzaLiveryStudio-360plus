@@ -7,6 +7,7 @@
 #include <QJsonValue>
 
 #include <algorithm>
+#include <cmath>
 
 namespace fls::scene {
 namespace {
@@ -112,6 +113,9 @@ QJsonObject contourToJson(const ContourFigure &figure) {
 
     writeBase(object, figure);
     object.insert(QStringLiteral("kind"), QStringLiteral("contour"));
+    object.insert(QStringLiteral("path_kind"), figure.data.pathKind == ContourPathKind::Lining
+        ? QStringLiteral("lining") : QStringLiteral("pen"));
+    object.insert(QStringLiteral("stroke_width"), figure.data.strokeWidth);
     object.insert(QStringLiteral("points"), contourPointsToJson(figure.data.points));
     for (const auto &points : figure.data.cutouts) {
         cutouts.append(contourPointsToJson(points));
@@ -131,6 +135,12 @@ std::unique_ptr<ContourFigure> contourFromJson(const QJsonObject &object) {
     auto figure = std::make_unique<ContourFigure>();
 
     readBase(object, *figure);
+    figure->data.pathKind = object.value(QStringLiteral("path_kind")).toString() == QStringLiteral("lining")
+        ? ContourPathKind::Lining : ContourPathKind::Pen;
+    figure->data.strokeWidth = object.value(QStringLiteral("stroke_width")).toDouble(kDefaultLiningWidth);
+    if (!std::isfinite(figure->data.strokeWidth) || figure->data.strokeWidth <= 0.0) {
+        figure->data.strokeWidth = kDefaultLiningWidth;
+    }
     figure->data.points = contourPointsFromJson(object.value(QStringLiteral("points")).toArray());
     for (const auto &cutout : object.value(QStringLiteral("cutouts")).toArray()) {
         figure->data.cutouts.push_back(contourPointsFromJson(cutout.toArray()));

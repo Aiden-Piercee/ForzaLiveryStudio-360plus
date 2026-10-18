@@ -20,7 +20,7 @@ struct LiningPath {
 struct LiningFillRequest {
     QVector<PenPoint> points;
     QVector<PenPrimitive> primitives;
-    double width = 8.0;
+    double width = fls::scene::kDefaultLiningWidth;
 };
 
 struct LiningStrokeSegment {

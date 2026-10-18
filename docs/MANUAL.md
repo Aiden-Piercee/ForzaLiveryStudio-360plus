@@ -78,9 +78,15 @@ Bucket tool automates the process described in Pen by generating the contour on 
 
 >Selecting a layer in Layers widget with `Alt` held will mark it as a leeway layer for new fill pass. The generated fill will try to conserve shapes by accounting for occlusion. 
 
+Saved Pen and Lining paths appear in **Layers**. Use **Edit → Save Pen or Lining
+Path as Figure** to save the active path, then select it and use **Properties →
+Color** to set its outline and fill color. Dark outlines have a white border;
+light outlines have a black border. **Options → Automatically Save Pen and Lining
+Paths** saves paths before filling. The option is off by default.
+
 ### Lining (experimental)
 
-Lining traces an open curve with native shapes. Right-click to finish drawing,
+Lining traces an open curve with native shapes. New Lining paths use black. Right-click to finish drawing,
 then press `Enter` to generate the stroke. The toolbar width sets a uniform
 stroke thickness. Drag either blue width handle at an anchor to change its
 local thickness, or scroll over the handle. Right-click a width handle to reset

@@ -24,6 +24,13 @@ struct PenCurveHit {
 using PathInteractionState = fls::scene::ContourData;
 
 struct PathInteraction {
+    explicit PathInteraction(fls::scene::ContourPathKind kind = fls::scene::ContourPathKind::Pen)
+        : pathKind(kind) {
+        if (pathKind == fls::scene::ContourPathKind::Lining) {
+            fillColor = fls::scene::kDefaultLiningFillColor;
+        }
+    }
+
     QVector<PenPoint> points;
     QVector<QVector<PenPoint>> cutouts;
     std::optional<QColor> fillColor;
@@ -42,6 +49,8 @@ struct PathInteraction {
     int activeCutout = -1;
     bool closed = false;
     bool cutoutClosed = true;
+    fls::scene::ContourPathKind pathKind = fls::scene::ContourPathKind::Pen;
+    double strokeWidth = fls::scene::kDefaultLiningWidth;
     bool fillMask = false;
     bool fillRunning = false;
     QVector<PathInteractionState> undoStack;
@@ -62,7 +71,8 @@ struct PathInteraction {
         points.clear();
         cutouts.clear();
         crossings.clear();
-        fillColor.reset();
+        fillColor = pathKind == fls::scene::ContourPathKind::Lining
+            ? std::optional<QColor>(fls::scene::kDefaultLiningFillColor) : std::nullopt;
         error.clear();
         fillMessage.clear();
         resetHover();

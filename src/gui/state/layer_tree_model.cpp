@@ -346,13 +346,11 @@ void paintPreviewNode(QImage &image,
     if (node.kind() == fls::scene::LayerKind::Contour && node.visible) {
         QPainter painter(&image);
         const QTransform world = includeNodeTransform ? sceneLocalTransform(node) * parentWorld : parentWorld;
-        QPen pen(QColor(65, 175, 245), 2.0);
+        const auto &figure = static_cast<const fls::scene::ContourFigure &>(node);
 
-        pen.setCosmetic(true);
         painter.setRenderHint(QPainter::Antialiasing, true);
-        painter.setPen(pen);
-        painter.setBrush(Qt::NoBrush);
-        painter.drawPath((world * worldToPreview).map(contourFigurePath(static_cast<const fls::scene::ContourFigure &>(node))));
+        paintContourOutline(painter, (world * worldToPreview).map(contourFigurePath(figure)),
+                            fls::scene::contourFillColor(figure.data));
         return;
     }
     if (node.kind() != fls::scene::LayerKind::Group || !node.visible) {
@@ -447,6 +445,7 @@ quint64 contentSignature(const fls::scene::Layer &node, QHash<QString, quint64> 
                 }
                 seed = mixHash(seed, static_cast<quint64>(point.kind));
                 seed = mixHash(seed, point.explicitHandles);
+                seed = mixHash(seed, hashDouble(point.strokeWidth));
             }
         };
 
@@ -456,6 +455,9 @@ quint64 contentSignature(const fls::scene::Layer &node, QHash<QString, quint64> 
         }
         seed = mixHash(seed, figure.data.closed);
         seed = mixHash(seed, figure.data.cutoutClosed);
+        seed = mixHash(seed, static_cast<quint64>(figure.data.pathKind));
+        seed = mixHash(seed, hashDouble(figure.data.strokeWidth));
+        seed = mixHash(seed, fls::scene::contourFillColor(figure.data).rgba());
         break;
     }
     case fls::scene::LayerKind::Shape: {

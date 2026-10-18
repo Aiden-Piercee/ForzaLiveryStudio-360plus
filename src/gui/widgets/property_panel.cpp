@@ -653,7 +653,8 @@ TransformAverage boxTargetAverage(const QVector<fls::scene::Shape *> &layers,
 QVector<QString> transformTargetIdsForSelection(EditorState *state,
                                                 const QVector<fls::scene::Shape *> &layers,
                                                 const QVector<fls::scene::GuideLayer *> &guides,
-                                                const QVector<fls::scene::Group *> &groups) {
+                                                const QVector<fls::scene::Group *> &groups,
+                                                const QVector<fls::scene::ContourFigure *> &contours = {}) {
     QVector<QString> ids;
     QSet<QString> seen;
     const auto add = [&](const QString &id) {
@@ -678,6 +679,12 @@ QVector<QString> transformTargetIdsForSelection(EditorState *state,
             add(guide->id);
         }
     }
+    for (const fls::scene::ContourFigure *contour : contours) {
+        if (contour != nullptr && !groupedLayerIds.contains(contour->id)) {
+            add(contour->id);
+        }
+    }
+
     return ids;
 }
 
@@ -885,7 +892,8 @@ void PropertyPanel::setLayers(const QVector<fls::scene::Shape *> &layers) {
 
 void PropertyPanel::setSelection(const QVector<fls::scene::Shape *> &layers,
                                  const QVector<fls::scene::GuideLayer *> &guides,
-                                 const QVector<fls::scene::Group *> &groups) {
+                                 const QVector<fls::scene::Group *> &groups,
+                                 const QVector<fls::scene::ContourFigure *> &contours) {
     if (applyingChange_ || valueLabelDragging_) {
         return;
     }
@@ -894,14 +902,25 @@ void PropertyPanel::setSelection(const QVector<fls::scene::Shape *> &layers,
     layers_ = layers;
     guides_ = guides;
     groups_ = groups;
+    contours_ = contours;
     baselines_.clear();
-    setEnabled(!layers_.isEmpty() || !guides_.isEmpty() || !groups_.isEmpty());
+    setEnabled(!layers_.isEmpty() || !guides_.isEmpty() || !groups_.isEmpty() || !contours_.isEmpty());
     if (!isBoxSelection()) {
         boxProxyBaseValid_ = false;
         boxProxySignature_.clear();
     }
-    if (layers_.isEmpty() && guides_.isEmpty() && groups_.isEmpty()) {
+    if (layers_.isEmpty() && guides_.isEmpty() && groups_.isEmpty() && contours_.isEmpty()) {
         debug_->setText(QString());
+        loading_ = false;
+        return;
+    }
+    if (!contours_.isEmpty() && groups_.isEmpty()) {
+        for (QWidget *widget : layerPropertyWidgets(name_, shapeId_, x_, y_, scaleX_, scaleY_, rotation_, skew_, opacity_, visible_, locked_, mask_, colorButton_)) {
+            widget->setEnabled(false);
+        }
+        name_->setText(contours_.size() == 1 ? contours_.front()->name : QString());
+        updateColorButton();
+        debug_->setText(QStringLiteral("%1 saved path(s) selected").arg(contours_.size()));
         loading_ = false;
         return;
     }
@@ -1373,7 +1392,7 @@ void PropertyPanel::applyChanged(QWidget *sender) {
     if (!guides_.isEmpty() && (sender != locked_)) {
         for (const fls::scene::GuideLayer *guide : guides_) {
             if (guide->locked) {
-                setSelection(layers_, guides_, groups_);
+                setSelection(layers_, guides_, groups_, contours_);
                 return;
             }
         }
@@ -1382,7 +1401,7 @@ void PropertyPanel::applyChanged(QWidget *sender) {
         const QSet<QString> lockedIds = state_->lockedLayerIds();
         for (const fls::scene::Shape *layer : layers_) {
             if (lockedIds.contains(layer->id)) {
-                setSelection(layers_, guides_, groups_);
+                setSelection(layers_, guides_, groups_, contours_);
                 return;
             }
         }
@@ -1405,7 +1424,7 @@ void PropertyPanel::applyChanged(QWidget *sender) {
     applyingChange_ = true;
     const bool transformOnly = isTransformProperty(property);
     if (transformOnly) {
-        state_->beginTransformCommand(transformTargetIdsForSelection(state_, layers_, guides_, groups_));
+        state_->beginTransformCommand(transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
     } else {
         state_->beginProjectEdit();
         detachSelectionForEdit();
@@ -1496,7 +1515,7 @@ void PropertyPanel::applyChanged(QWidget *sender) {
     } else {
         state_->commitProjectEdit();
     }
-    const QVector<QString> changedIds = transformTargetIdsForSelection(state_, layers_, guides_, groups_);
+    const QVector<QString> changedIds = transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_);
     if (property == QStringLiteral("visible") || property == QStringLiteral("mask") || property == QStringLiteral("shapeId")
         || (property == QStringLiteral("opacity") && guides_.isEmpty())) {
         state_->noteProjectGeometryChanged(true, changedIds);
@@ -1559,7 +1578,7 @@ bool PropertyPanel::beginValueLabelDrag(const QString &property, QDoubleSpinBox 
 
     valueLabelUsesTransformCommand_ = isTransformProperty(property);
     if (valueLabelUsesTransformCommand_) {
-        state_->beginTransformCommand(transformTargetIdsForSelection(state_, layers_, guides_, groups_));
+        state_->beginTransformCommand(transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
     } else {
         state_->beginProjectEdit();
     }
@@ -1669,7 +1688,7 @@ void PropertyPanel::updateValueLabelDrag(const QPoint &globalPos) {
             const QSignalBlocker blocker(valueLabelBox_);
             valueLabelBox_->setValue(proxy);
         }
-        state_->noteTransformLiveChanged(transformTargetIdsForSelection(state_, layers_, guides_, groups_));
+        state_->noteTransformLiveChanged(transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
         if (globalPos.x() != valueLabelStartGlobal_.x()) {
             QCursor::setPos(valueLabelStartGlobal_.x(), globalPos.y());
         }
@@ -1723,7 +1742,7 @@ void PropertyPanel::updateValueLabelDrag(const QPoint &globalPos) {
         updateColorButton();
     }
     if (isTransformProperty(valueLabelProperty_)) {
-        state_->noteTransformLiveChanged(transformTargetIdsForSelection(state_, layers_, guides_, groups_));
+        state_->noteTransformLiveChanged(transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
     } else {
         state_->noteCanvasRepaint();
     }
@@ -1756,7 +1775,7 @@ void PropertyPanel::endValueLabelDrag(bool commit) {
             state_->commitProjectEdit();
         }
         const bool refreshPreviews = property == QStringLiteral("opacity") && guides_.isEmpty();
-        state_->noteProjectGeometryChanged(refreshPreviews, transformTargetIdsForSelection(state_, layers_, guides_, groups_));
+        state_->noteProjectGeometryChanged(refreshPreviews, transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
     } else {
         if (valueLabelUsesTransformCommand_) {
             state_->cancelTransformCommand();
@@ -1779,7 +1798,10 @@ void PropertyPanel::detachSelectionForEdit() {
     QSet<QString> layerIds;
     QSet<QString> guideIds;
     QVector<QString> groupIds;
-    layerIds.reserve(layers_.size());
+    layerIds.reserve(layers_.size() + contours_.size());
+    for (const auto *contour : contours_) {
+        layerIds.insert(contour->id);
+    }
     guideIds.reserve(guides_.size());
     groupIds.reserve(groups_.size());
     for (const fls::scene::Shape *layer : layers_) {
@@ -1800,9 +1822,12 @@ void PropertyPanel::setSelectionByIds(const QSet<QString> &layerIds,
     QVector<fls::scene::Shape *> layers;
     QVector<fls::scene::GuideLayer *> guides;
     QVector<fls::scene::Group *> groups;
+    QVector<fls::scene::ContourFigure *> contours;
     for (const QString &id : layerIds) {
         if (auto *layer = dynamic_cast<fls::scene::Shape *>(state_->sceneNode(id))) {
             layers.push_back(layer);
+        } else if (auto *contour = dynamic_cast<fls::scene::ContourFigure *>(state_->sceneNode(id))) {
+            contours.push_back(contour);
         }
     }
     for (const QString &id : guideIds) {
@@ -1815,7 +1840,7 @@ void PropertyPanel::setSelectionByIds(const QSet<QString> &layerIds,
             groups.push_back(group);
         }
     }
-    setSelection(layers, guides, groups);
+    setSelection(layers, guides, groups, contours);
 }
 
 void PropertyPanel::applySingle(QWidget *sender) {
@@ -1880,18 +1905,28 @@ void PropertyPanel::applyMulti(QWidget *sender, const QString &property) {
 QVector<std::array<quint8, 4>> PropertyPanel::selectionColors(bool colorableOnly) const {
     ScopedPerf perf("PropertyPanel::selectionColors");
     QVector<std::array<quint8, 4>> colors;
-    const auto appendColor = [&](const fls::scene::Shape *layer) {
-        if (layer != nullptr && (!colorableOnly || isColorableShape(layer))) {
-            colors.push_back(layer->color);
+    const auto appendColor = [&](const fls::scene::Layer *node) {
+        if (const auto *layer = dynamic_cast<const fls::scene::Shape *>(node)) {
+            if (!colorableOnly || isColorableShape(layer)) {
+                colors.push_back(layer->color);
+            }
+        } else if (const auto *contour = dynamic_cast<const fls::scene::ContourFigure *>(node);
+                   contour != nullptr && (!colorableOnly || !state_->isLayerLocked(contour->id))) {
+            const QColor color = fls::scene::contourFillColor(contour->data);
+            colors.push_back({static_cast<quint8>(color.blue()), static_cast<quint8>(color.green()),
+                              static_cast<quint8>(color.red()), static_cast<quint8>(color.alpha())});
         }
     };
     for (const fls::scene::Shape *layer : layers_) {
         appendColor(layer);
     }
+    for (const fls::scene::ContourFigure *contour : contours_) {
+        appendColor(contour);
+    }
     for (const fls::scene::Group *group : groups_) {
         const QVector<QString> ids = state_->leafLayerIdsForEntry(group->id);
         for (const QString &id : ids) {
-            appendColor(dynamic_cast<const fls::scene::Shape *>(state_->sceneNode(id)));
+            appendColor(state_->sceneNode(id));
         }
     }
 
@@ -1910,22 +1945,31 @@ std::optional<std::array<quint8, 4>> PropertyPanel::currentSelectionColor() cons
     return colors.front();
 }
 
+void PropertyPanel::setSelectionColor(const std::array<quint8, 4> &color) {
+    for (fls::scene::Shape *layer : layers_) {
+        if (isColorableShape(layer)) {
+            layer->color = color;
+        }
+    }
+    for (fls::scene::ContourFigure *contour : contours_) {
+        if (!state_->isLayerLocked(contour->id)) {
+            contour->data.fillColor = QColor(color[2], color[1], color[0], color[3]);
+        }
+    }
+    for (fls::scene::Group *group : groups_) {
+        state_->setGroupDescendantColor(group->id, color);
+    }
+}
+
 void PropertyPanel::applyColorToSelection(const std::array<quint8, 4> &color) {
     if (colorableSelectionColors().isEmpty()) {
         return;
     }
     state_->beginProjectEdit();
     detachSelectionForEdit();
-    for (fls::scene::Shape *layer : layers_) {
-        if (isColorableShape(layer)) {
-            layer->color = color;
-        }
-    }
-    for (fls::scene::Group *group : groups_) {
-        state_->setGroupDescendantColor(group->id, color);
-    }
+    setSelectionColor(color);
     state_->commitProjectEdit();
-    state_->noteProjectGeometryChanged(true, transformTargetIdsForSelection(state_, layers_, guides_, groups_));
+    state_->noteProjectGeometryChanged(true, transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
     updateColorButton();
 }
 
@@ -1977,14 +2021,7 @@ void PropertyPanel::pickColor() {
             static_cast<quint8>(picked.red()),
             static_cast<quint8>(picked.alpha()),
         };
-        for (fls::scene::Shape *layer : layers_) {
-            if (isColorableShape(layer)) {
-                layer->color = color;
-            }
-        }
-        for (fls::scene::Group *group : groups_) {
-            state_->setGroupDescendantColor(group->id, color);
-        }
+        setSelectionColor(color);
         state_->noteCanvasRepaint();
         colorButton_->setText(QStringLiteral("Color"));
         colorButton_->setStyleSheet(colorStyle(color));
@@ -1992,7 +2029,7 @@ void PropertyPanel::pickColor() {
 
     if (dialog.exec() == QDialog::Accepted) {
         state_->commitProjectEdit();
-        state_->noteProjectGeometryChanged(true, transformTargetIdsForSelection(state_, layers_, guides_, groups_));
+        state_->noteProjectGeometryChanged(true, transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
         updateColorButton();
     } else {
         state_->cancelProjectEdit();

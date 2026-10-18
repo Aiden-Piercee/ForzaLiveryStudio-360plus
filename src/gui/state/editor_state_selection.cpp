@@ -25,6 +25,14 @@ QVector<fls::scene::Shape *> EditorState::selectedLayers() {
     return selectedNodes(selectedLayerIds_, projectIndexCache().layers);
 }
 
+QVector<fls::scene::ContourFigure *> EditorState::selectedContours() {
+    if (!hasProject_) {
+        return {};
+    }
+
+    return selectedNodes(selectedLayerIds_, projectIndexCache().contours);
+}
+
 QVector<fls::scene::GuideLayer *> EditorState::selectedGuideLayers() {
     if (!hasProject_) {
         return {};
