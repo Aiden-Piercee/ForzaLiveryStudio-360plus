@@ -94,13 +94,13 @@ The import/export for groups is fully supported, core functionality in place. So
 | Version     | Group          | Livery        |
 |-------------|----------------|---------------| 
 | Horizon 6   | Import/Export  | Import/Export |
+| Motosport 23| Import         | Import        |
 | Horizon 5   | Import/Export  | Import/Export |
+| Motosport 7 | Import/Export  | Import/Export |
 | Horizon 3   | Import/Export  | Import/Export |
+| Motosport 6 | Import/Export  | Import/Export |
 | Horizon 2   | Import/Export  | Import/Export |
 | Motosport 5 | Import/Export  | Import/Export |
-| Motosport 6 | Import/Export  | Import/Export |
-| Motosport 7 | Import/Export  | Import/Export |
-| Motosport 23| Import         | Import        |
 
 ## Documentation
 

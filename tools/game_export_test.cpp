@@ -193,7 +193,7 @@ void testLiveries(const QString &root) {
         fls::ExportGameVersion::Horizon4};
     const std::array<quint32, 9> versions = {7, 6, 9, 0, 1, 0, 0, 2, 4};
     const std::array<int, 9> envelopes = {51, 50, 66, 49, 50, 45, 49, 50, 50};
-    const std::array<bool, 9> supportsMasks = {true, true, true, false, false, false, false, true, true};
+    const std::array<bool, 9> supportsMasks = {true, true, true, false, false, false, false, false, true};
     for (int gameIndex = 0; gameIndex < static_cast<int>(games.size()); ++gameIndex) {
         const auto game = games[gameIndex];
         require(fls::exportGameSupportsMasks(game) == supportsMasks[gameIndex], "game mask support");
@@ -296,7 +296,8 @@ void testGroups(const QString &root) {
 
 void testDiscardedMasks(const QString &root) {
     using Game = fls::ExportGameVersion;
-    for (const auto game : {Game::Horizon2, Game::Horizon3, Game::Motorsport5, Game::Motorsport6}) {
+    for (const auto game : {Game::Horizon2, Game::Horizon3, Game::Motorsport5, Game::Motorsport6,
+            Game::Motorsport7}) {
         for (bool livery : {false, true}) {
             auto project = makeLivery(6, true);
             if (!livery) {

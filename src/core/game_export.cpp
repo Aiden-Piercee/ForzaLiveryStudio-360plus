@@ -618,6 +618,7 @@ bool exportGameSupportsMasks(ExportGameVersion game) {
     case ExportGameVersion::Horizon3:
     case ExportGameVersion::Motorsport5:
     case ExportGameVersion::Motorsport6:
+    case ExportGameVersion::Motorsport7:
         return false;
     default:
         return true;
