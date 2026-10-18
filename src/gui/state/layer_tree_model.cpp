@@ -172,15 +172,9 @@ bool allShapeMask(const fls::scene::Layer &node) {
         return false;
     }
     const auto &group = static_cast<const fls::scene::Group &>(node);
-    if (group.children.empty()) {
-        return false;
-    }
-    for (const auto &child : group.children) {
-        if (!allShapeMask(*child)) {
-            return false;
-        }
-    }
-    return true;
+    const auto shapes = sceneShapeLeaves(group);
+
+    return !shapes.isEmpty() && std::all_of(shapes.cbegin(), shapes.cend(), [](const auto *shape) { return shape->mask; });
 }
 
 QRectF previewShapeLocalRect(const fls::scene::Shape &shape, const ShapeGeometryStore &geometry) {
@@ -703,81 +697,56 @@ QStringList LayerTreeModel::mimeTypes() const { return {QString::fromLatin1(kLay
 
 QMimeData *LayerTreeModel::mimeData(const QModelIndexList &indexes) const {
     auto *mime = new QMimeData();
-    QVector<QModelIndex> rows;
-    QSet<QString> seen;
+    QVector<QString> entries;
     for (const QModelIndex &index : indexes) {
         if (index.isValid() && index.column() == 0) {
-            const QString id = index.data(EntryIdRole).toString();
-            if (!id.isEmpty() && !seen.contains(id)) {
-                rows.push_back(index);
-                seen.insert(id);
-            }
+            entries.push_back(index.data(EntryIdRole).toString());
         }
     }
-    std::sort(rows.begin(), rows.end(), [](const QModelIndex &a, const QModelIndex &b) { return a.row() < b.row(); });
-    QString parentGroupId;
-    QVector<QString> entryIds;
-    bool haveParent = false;
-    for (const QModelIndex &index : rows) {
-        const QString entryId = index.data(EntryIdRole).toString();
-        const QString rowParent = state_ != nullptr ? state_->parentGroupForEntry(entryId)
-                                                    : (index.parent().isValid() ? index.parent().data(EntryIdRole).toString() : displayParentGroupId_);
-        if (!haveParent) {
-            parentGroupId = rowParent;
-            haveParent = true;
-        } else if (parentGroupId != rowParent) {
-            entryIds.clear();
-            break;
-        }
-        entryIds.push_back(entryId);
+    if (state_ != nullptr) {
+        entries = state_->normalizeEntrySelection(entries);
     }
     QByteArray payload;
     QDataStream stream(&payload, QIODevice::WriteOnly);
-    stream << parentGroupId << entryIds;
+    stream << quint64(reinterpret_cast<quintptr>(state_)) << entries;
     mime->setData(QString::fromLatin1(kLayerEntryMimeType), payload);
+
     return mime;
 }
 
+std::optional<EditorCommand> LayerTreeModel::dropCommand(const QMimeData *data, Qt::DropAction action,
+                                                        int row, int column, const QModelIndex &parent) const {
+    if (state_ == nullptr || data == nullptr || action != Qt::MoveAction || column > 0
+        || !data->hasFormat(QString::fromLatin1(kLayerEntryMimeType))) {
+        return std::nullopt;
+    }
+    QDataStream stream(data->data(QString::fromLatin1(kLayerEntryMimeType)));
+    quint64 owner = 0;
+    EditorCommand command;
+    stream >> owner >> command.entries;
+    if (stream.status() != QDataStream::Ok || owner != quint64(reinterpret_cast<quintptr>(state_))) {
+        return std::nullopt;
+    }
+    command.type = EditorCommandType::MoveEntries;
+    command.parentId = parent.isValid() ? parent.data(EntryIdRole).toString() : displayParentGroupId_;
+    command.row = row < 0 ? rowCount(parent) : std::clamp(row, 0, rowCount(parent));
+    command.row = rowCount(parent) - command.row;
+    command.deferRefresh = true;
+
+    return command;
+}
+
+bool LayerTreeModel::canDropMimeData(const QMimeData *data, Qt::DropAction action, int row, int column,
+                                    const QModelIndex &parent) const {
+    const auto command = dropCommand(data, action, row, column, parent);
+
+    return command.has_value() && state_->canMoveEntries(command->entries, command->parentId);
+}
+
 bool LayerTreeModel::dropMimeData(const QMimeData *data, Qt::DropAction action, int row, int column, const QModelIndex &parent) {
-    if (state_ == nullptr || data == nullptr || action != Qt::MoveAction || column > 0) {
-        return false;
-    }
-    QByteArray payload = data->data(QString::fromLatin1(kLayerEntryMimeType));
-    if (payload.isEmpty()) {
-        return false;
-    }
-    QDataStream stream(payload);
-    QString sourceParentGroupId;
-    QVector<QString> entryIds;
-    stream >> sourceParentGroupId >> entryIds;
-    const QString targetParentGroupId = parent.isValid() ? parent.data(EntryIdRole).toString() : sourceParentGroupId;
-    if (entryIds.isEmpty() || targetParentGroupId != sourceParentGroupId) {
-        return false;
-    }
-    if (row < 0) {
-        row = rowCount(parent);
-    }
-    QVector<QString> movedEntries = entryIds;
-    std::reverse(movedEntries.begin(), movedEntries.end());
-    const int siblingCount = rowCount(parent);
-    const int clampedRow = std::clamp(row, 0, siblingCount);
-    state_->beginProjectEdit();
-    const bool changed = state_->reorderEntries(targetParentGroupId, movedEntries, siblingCount - clampedRow);
-    if (changed) {
-        const QSet<QString> preservedSelection = state_->selectedLayerIds();
-        const QSet<QString> preservedGuideSelection = state_->selectedGuideLayerIds();
-        state_->commitProjectEdit();
-        QPointer<EditorState> state(state_);
-        QMetaObject::invokeMethod(this, [state, preservedSelection, preservedGuideSelection]() {
-            if (!state.isNull()) {
-                state->noteProjectStructureChanged();
-                state->setSelectionIds(preservedSelection, preservedGuideSelection);
-            }
-        }, Qt::QueuedConnection);
-    } else {
-        state_->cancelProjectEdit();
-    }
-    return changed;
+    const auto command = dropCommand(data, action, row, column, parent);
+
+    return command.has_value() && state_->executeCommand(*command);
 }
 
 void LayerTreeModel::refreshStateRoles(const fls::Project *project) {

@@ -198,8 +198,9 @@ endif()
 
 set(FORZA_LIVERY_STUDIO_TARGET ForzaLiveryStudio)
 
-qt_add_executable(${FORZA_LIVERY_STUDIO_TARGET} WIN32
-    src/main.cpp
+qt6_wrap_cpp(fls_editor_state_moc src/gui/state/editor_state.h)
+qt_add_library(fls_editor_ui STATIC
+    ${fls_editor_state_moc}
     src/gui/app/car_registry.cpp
     src/gui/app/car_registry.h
     src/gui/app/dock_chrome.cpp
@@ -224,6 +225,7 @@ qt_add_executable(${FORZA_LIVERY_STUDIO_TARGET} WIN32
     src/gui/key_bindings.cpp
     src/gui/key_bindings.h
     src/gui/state/editor_state.cpp
+    src/gui/state/editor_state_commands.cpp
     src/gui/state/editor_state.h
     src/gui/state/editor_state_clipboard.cpp
     src/gui/state/editor_state_grouping.cpp
@@ -327,20 +329,23 @@ qt_add_executable(${FORZA_LIVERY_STUDIO_TARGET} WIN32
     src/gui/widgets/shapes_browser_widget.h
 )
 
+qt_add_executable(${FORZA_LIVERY_STUDIO_TARGET} WIN32 src/main.cpp)
+target_link_libraries(${FORZA_LIVERY_STUDIO_TARGET} PRIVATE fls_editor_ui)
+
 if(FLS_CUDA_AVAILABLE)
-    target_sources(${FORZA_LIVERY_STUDIO_TARGET} PRIVATE
+    target_sources(fls_editor_ui PRIVATE
         src/gui/fill/compact_fit_gpu_rank.cu
     )
     target_compile_definitions(
-        ${FORZA_LIVERY_STUDIO_TARGET} PRIVATE FLS_HAS_CUDA=1)
-    target_compile_options(${FORZA_LIVERY_STUDIO_TARGET} PRIVATE
+        fls_editor_ui PRIVATE FLS_HAS_CUDA=1)
+    target_compile_options(fls_editor_ui PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/Zc:__cplusplus>
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>
     )
     target_link_libraries(
-        ${FORZA_LIVERY_STUDIO_TARGET} PRIVATE CUDA::cudart)
-    set_target_properties(${FORZA_LIVERY_STUDIO_TARGET} PROPERTIES
+        fls_editor_ui PUBLIC CUDA::cudart)
+    set_target_properties(fls_editor_ui PROPERTIES
         CUDA_ARCHITECTURES all-major
         CUDA_RUNTIME_LIBRARY Shared
     )
@@ -353,7 +358,7 @@ if(FLS_CUDA_AVAILABLE)
     endif()
 endif()
 
-target_include_directories(${FORZA_LIVERY_STUDIO_TARGET} PRIVATE
+target_include_directories(fls_editor_ui PUBLIC
     src
     src/gui/app
     src/gui/state
@@ -362,8 +367,8 @@ target_include_directories(${FORZA_LIVERY_STUDIO_TARGET} PRIVATE
     src/gui/widgets
 )
 
-target_link_libraries(${FORZA_LIVERY_STUDIO_TARGET}
-    PRIVATE
+target_link_libraries(fls_editor_ui
+    PUBLIC
         fls_core
         fls_profile_compute
         clipper2
@@ -375,7 +380,7 @@ target_link_libraries(${FORZA_LIVERY_STUDIO_TARGET}
         Qt6::Svg
 )
 
-target_compile_definitions(${FORZA_LIVERY_STUDIO_TARGET}
+target_compile_definitions(fls_editor_ui
     PRIVATE
         FLS_ENABLE_IMGGEN_MENU=$<BOOL:${FLS_ENABLE_IMGGEN_MENU}>
 )
@@ -465,12 +470,23 @@ if(FLS_BUILD_TESTS)
     target_include_directories(fls_selection_geometry_tests PRIVATE src/gui/canvas src/gui/widgets)
     target_link_libraries(fls_selection_geometry_tests PRIVATE Qt6::Core Qt6::Gui)
     add_test(NAME selection_geometry COMMAND fls_selection_geometry_tests)
-    qt6_wrap_cpp(fls_editor_state_moc src/gui/state/editor_state.h)
+    add_executable(fls_gui_command_tests tools/gui_command_test.cpp)
+    target_link_libraries(fls_gui_command_tests PRIVATE fls_editor_ui)
+    if(WIN32)
+        add_custom_command(TARGET fls_gui_command_tests POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:fls_gui_command_tests>/platforms"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${Qt6_DIR}/../../Qt6/plugins/platforms/qminimal.dll"
+                "$<TARGET_FILE_DIR:fls_gui_command_tests>/platforms/qminimal.dll")
+    endif()
+    add_test(NAME gui_commands COMMAND fls_gui_command_tests)
+    set_tests_properties(gui_commands PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     add_executable(fls_editor_selection_tests
         ${fls_editor_state_moc}
         tools/editor_selection_test.cpp
         src/gui/state/editor_state.h
         src/gui/state/editor_state.cpp
+        src/gui/state/editor_state_commands.cpp
         src/gui/state/editor_state_selection.cpp
         src/gui/state/editor_state_snapshot.cpp
         src/gui/state/editor_state_clipboard.cpp
@@ -537,15 +553,17 @@ if(FLS_BUILD_TESTS)
     endif()
 
     add_executable(fls_game_roundtrip_tests
+        ${fls_editor_state_moc}
         tools/game_roundtrip_test.cpp
         src/gui/state/editor_state.h
         src/gui/state/editor_state.cpp
+        src/gui/state/editor_state_commands.cpp
         src/gui/state/editor_state_clipboard.cpp
         src/gui/state/editor_state_grouping.cpp
         src/gui/state/editor_state_selection.cpp
         src/gui/state/editor_state_snapshot.cpp)
     target_include_directories(fls_game_roundtrip_tests PRIVATE
-        src/gui/app src/gui/state src/gui/widgets)
+        src/gui/app src/gui/state src/gui/widgets src/gui/fill)
     target_link_libraries(fls_game_roundtrip_tests PRIVATE fls_core Qt6::Gui)
     add_test(NAME game_project_roundtrip COMMAND fls_game_roundtrip_tests)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/Forza Livery.3so")
@@ -584,6 +602,7 @@ if(FLS_BUILD_TESTS)
         src/gui/app/theme_manager.cpp
         src/gui/state/editor_state.h
         src/gui/state/editor_state.cpp
+        src/gui/state/editor_state_commands.cpp
         src/gui/state/editor_state_selection.cpp
         src/gui/state/editor_state_snapshot.cpp
         src/gui/state/editor_state_clipboard.cpp
@@ -838,7 +857,7 @@ if(WIN32)
         "${FLS_PROJECT_DARK_ICON}"
     )
     target_sources(${FORZA_LIVERY_STUDIO_TARGET} PRIVATE "${FLS_WINDOWS_RESOURCES}")
-    target_link_libraries(${FORZA_LIVERY_STUDIO_TARGET} PRIVATE windowscodecs ole32 shell32 gdi32 advapi32)
+    target_link_libraries(fls_editor_ui PUBLIC windowscodecs ole32 shell32 gdi32 advapi32)
     add_custom_command(TARGET ${FORZA_LIVERY_STUDIO_TARGET} POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${FORZA_LIVERY_STUDIO_TARGET}>/platforms"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different

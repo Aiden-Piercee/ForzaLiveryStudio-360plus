@@ -31,7 +31,7 @@ private:
 
     QRect badgeRect(const QRect &rowRect, Badge badge) const;
     Badge badgeAt(const QRect &rowRect, const QPoint &point) const;
-    void toggle(const QModelIndex &index, Badge badge);
+    void toggle(const QModelIndex &index, Badge badge, bool selected);
 
     EditorState *state_ = nullptr;
     QPixmap visible_;

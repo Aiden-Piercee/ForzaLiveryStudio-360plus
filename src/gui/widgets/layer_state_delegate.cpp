@@ -154,7 +154,7 @@ bool LayerStateDelegate::editorEvent(QEvent *event,
     if (event->type() == QEvent::MouseButtonPress) {
         return true;
     }
-    toggle(index, badge);
+    toggle(index, badge, option.state.testFlag(QStyle::State_Selected));
     return true;
 }
 
@@ -188,58 +188,25 @@ LayerStateDelegate::Badge LayerStateDelegate::badgeAt(const QRect &rowRect, cons
     return Badge::None;
 }
 
-void LayerStateDelegate::toggle(const QModelIndex &index, Badge badge) {
+void LayerStateDelegate::toggle(const QModelIndex &index, Badge badge, bool selected) {
     const QString entryId = index.data(LayerTreeModel::EntryIdRole).toString();
     if (entryId.isEmpty() || state_->project() == nullptr) {
         return;
     }
-    const bool isGroup = index.data(LayerTreeModel::IsGroupRole).toBool();
-    const bool isGuide = index.data(LayerTreeModel::IsGuideRole).toBool();
-    const bool nextVisible = !index.data(LayerTreeModel::VisibleRole).toBool();
-    const bool nextMask = !index.data(LayerTreeModel::MaskRole).toBool();
-    const bool nextLocked = !index.data(LayerTreeModel::EffectiveLockedRole).toBool();
-
-    state_->beginProjectEdit();
+    EditorCommand command;
+    command.entries = selected ? state_->selectionEntries() : QVector<QString>{entryId};
+    if (command.entries.isEmpty()) {
+        command.entries = {entryId};
+    }
     switch (badge) {
-    case Badge::Visible:
-        if (isGuide) {
-            state_->setGuideLayerVisible(entryId, nextVisible);
-        } else if (isGroup) {
-            state_->setGroupDescendantVisible(entryId, nextVisible);
-        } else {
-            state_->setLayerVisible(entryId, nextVisible);
-        }
-        break;
-    case Badge::Mask:
-        if (isGuide || index.data(LayerTreeModel::IsContourRole).toBool()) {
-            state_->cancelProjectEdit();
-            return;
-        }
-        if (isGroup) {
-            state_->setGroupDescendantMask(entryId, nextMask);
-        } else {
-            state_->setLayerMask(entryId, nextMask);
-        }
-        break;
-    case Badge::Locked:
-        if (isGuide) {
-            state_->setGuideLayerLocked(entryId, nextLocked);
-        } else if (isGroup) {
-            state_->setGroupAndDescendantLocked(entryId, nextLocked);
-        } else {
-            state_->setLayerLockScope(entryId, nextLocked);
-        }
-        break;
-    case Badge::None:
-        state_->cancelProjectEdit();
-        return;
+    case Badge::Visible: command.property = QStringLiteral("visible"); break;
+    case Badge::Mask: command.property = QStringLiteral("mask"); break;
+    case Badge::Locked: command.property = QStringLiteral("locked"); break;
+    case Badge::None: return;
     }
-    state_->commitProjectEdit();
-    if (badge == Badge::Locked) {
-        state_->noteProjectStructureChanged();
-    } else {
-        state_->noteProjectGeometryChanged(true, {entryId});
-    }
+    command.value = state_->propertyCheckState(command.entries, command.property) != Qt::Checked;
+    command.deferRefresh = true;
+    state_->executeCommand(command);
 }
 
 } // namespace gui

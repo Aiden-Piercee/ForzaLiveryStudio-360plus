@@ -160,7 +160,7 @@ void EditorState::removeEntries(const QVector<QString> &entryIds) {
         }
         takeEntry(entryId);
     }
-    pruneEmptyGroups();
+    pruneRedundantGroups();
     invalidateProjectIndexCache();
 }
 

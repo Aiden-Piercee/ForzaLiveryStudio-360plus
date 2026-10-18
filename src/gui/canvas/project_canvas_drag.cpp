@@ -205,59 +205,32 @@ void ProjectCanvas::cycleFlipSelection() {
     const int nextStep = (flipCycle_->step + 1) % static_cast<int>(std::size(kCycleStates));
     const int nextState = kCycleStates[nextStep];
     const QPointF center = flipCycle_->bounds.center();
-    state_->beginTransformCommand(targetIds);
-
-    for (const QString &id : targetIds) {
-        if (fls::scene::Layer *node = state_->sceneNode(id)) {
-            node->transform = flipCycle_->baseline.value(id);
-        }
-    }
-
+    EditorCommand command;
+    command.type = EditorCommandType::LocalTransforms;
+    command.entries = targetIds;
+    command.transforms = flipCycle_->baseline;
     QTransform worldFlip;
     worldFlip.translate(center.x(), center.y());
     worldFlip.scale((nextState & 1) != 0 ? -1.0 : 1.0,
                     (nextState & 2) != 0 ? -1.0 : 1.0);
     worldFlip.translate(-center.x(), -center.y());
     if (nextState != 0) {
-        QHash<QString, QTransform> baselineGroupFrames;
-        for (const QString &id : groupIds) {
-            baselineGroupFrames.insert(id, entryStartTransform(flipCycle_->baseline.value(id)));
-        }
-        state_->setGroupFramesFromStart(baselineGroupFrames, worldFlip);
-    }
-
-    const auto applyFlip = [&](auto *item) {
-        if (nextState == 0) {
-            return;
-        }
-        using Item = std::remove_pointer_t<decltype(item)>;
-        const fls::scene::Transform2D baseline = flipCycle_->baseline.value(item->id);
-        const double skew = [&] {
-            if constexpr (std::is_same_v<Item, fls::scene::Shape>) {
-                return baseline.skew;
+        for (const QString &id : targetIds) {
+            const auto *node = state_->sceneNode(id);
+            const auto baseline = flipCycle_->baseline.value(id);
+            const EntryStart start{baseline.x, baseline.y, baseline.scaleX, baseline.scaleY, baseline.rotation, baseline.skew};
+            auto dec = decomposeScaleResult(localResultForWorldTransform(*node, start, worldFlip), baseline.skew);
+            if (!dec.ok) continue;
+            const bool scaleXNegative = (baseline.scaleX < 0.0) != ((nextState & 2) != 0);
+            if ((dec.scaleX < 0.0) != scaleXNegative) {
+                dec.scaleX = -dec.scaleX;
+                dec.scaleY = -dec.scaleY;
+                dec.rotation = normalizeRotation(dec.rotation + 180.0);
             }
-            return 0.0;
-        }();
-        const EntryStart start = {baseline.x, baseline.y, baseline.scaleX, baseline.scaleY,
-                                  baseline.rotation, skew};
-        ScaleDecomposition decomposition = decomposeScaleResult(
-            localResultForWorldTransform(*item, start, worldFlip), start.skew);
-        if (decomposition.ok) {
-            const bool scaleXNegative = (start.scaleX < 0.0) != ((nextState & 2) != 0);
-            if ((decomposition.scaleX < 0.0) != scaleXNegative) {
-                decomposition.scaleX = -decomposition.scaleX;
-                decomposition.scaleY = -decomposition.scaleY;
-                decomposition.rotation = normalizeRotation(decomposition.rotation + 180.0);
-            }
-            assignDecomposition(item, decomposition);
+            command.transforms.insert(id, {dec.x, dec.y, dec.scaleX, dec.scaleY, dec.rotation, dec.skew});
         }
-    };
-    for (fls::scene::Shape *layer : layers) {
-        applyFlip(layer);
     }
-    for (fls::scene::GuideLayer *guide : guides) {
-        applyFlip(guide);
-    }
+    if (!state_->executeCommand(command)) return;
 
     flipCycle_->expected.clear();
     for (const QString &id : targetIds) {
@@ -266,9 +239,6 @@ void ProjectCanvas::cycleFlipSelection() {
         }
     }
     flipCycle_->step = nextStep;
-    state_->noteTransformLiveChanged(targetIds);
-    state_->commitTransformCommand();
-    state_->noteProjectGeometryChanged(false, targetIds);
     invalidateSceneCache();
     update();
 }
@@ -614,32 +584,21 @@ bool ProjectCanvas::applyAlignDistribute(const std::function<QVector<QPointF>(co
         return false;
     }
 
-    state_->beginTransformCommand(buildTransformTargetIds(groupIds, looseLayers, looseGuides));
+    EditorCommand command;
+    command.type = EditorCommandType::LocalTransforms;
+    command.entries = buildTransformTargetIds(groupIds, looseLayers, looseGuides);
     for (int i = 0; i < units.size(); ++i) {
-        const QPointF delta = deltas[i];
-        if (delta.isNull()) {
-            continue;
-        }
-        const QTransform worldMove = QTransform::fromTranslate(delta.x(), delta.y());
         const MoveUnit &unit = units[i];
-        if (!unit.groupId.isEmpty()) {
-            state_->transformGroupFrames({unit.groupId}, worldMove);
-        } else if (unit.layer != nullptr) {
-            const EntryStart start{unit.layer->x, unit.layer->y, unit.layer->scaleX, unit.layer->scaleY, unit.layer->rotation, unit.layer->skew};
-            const ScaleDecomposition dec = decomposeScaleResult(localResultForWorldTransform(*unit.layer, start, worldMove), start.skew);
-            if (dec.ok) {
-                assignDecomposition(unit.layer, dec);
-            }
-        } else if (unit.guide != nullptr) {
-            const EntryStart start{unit.guide->x, unit.guide->y, unit.guide->scaleX, unit.guide->scaleY, unit.guide->rotation, 0.0};
-            const ScaleDecomposition dec = decomposeScaleResult(localResultForWorldTransform(*unit.guide, start, worldMove), start.skew);
-            if (dec.ok) {
-                assignDecomposition(unit.guide, dec);
-            }
-        }
+        const QString id = !unit.groupId.isEmpty() ? unit.groupId
+            : unit.layer != nullptr ? unit.layer->id : unit.guide->id;
+        const auto *node = state_->sceneNode(id);
+        const QTransform move = QTransform::fromTranslate(deltas[i].x(), deltas[i].y());
+        const auto &frame = node->transform;
+        const EntryStart start{frame.x, frame.y, frame.scaleX, frame.scaleY, frame.rotation, frame.skew};
+        const auto dec = decomposeScaleResult(localResultForWorldTransform(*node, start, move), frame.skew);
+        if (dec.ok) command.transforms.insert(id, {dec.x, dec.y, dec.scaleX, dec.scaleY, dec.rotation, dec.skew});
     }
-    state_->commitTransformCommand();
-    state_->noteProjectGeometryChanged(false, state_->selectedTransformTargetIds());
+    if (!state_->executeCommand(command)) return false;
     invalidateSceneCache();
     invalidateSelectionCache();
     update();

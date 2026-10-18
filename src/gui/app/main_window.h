@@ -232,6 +232,7 @@ private:
     void connectEditorStateSignals();
     void setupFileMenu();
     void setupEditMenu();
+    void bindEditorAction(QAction *action, const QString &id, std::function<void()> handler);
     void setupImgGenMenu();
     void setupOptionsMenu();
     void setupToolbar();

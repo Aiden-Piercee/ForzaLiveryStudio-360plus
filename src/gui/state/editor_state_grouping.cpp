@@ -3,6 +3,7 @@
 #include "matrix_math.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace gui {
 namespace {
@@ -238,9 +239,11 @@ bool EditorState::reorderGuideLayers(const QVector<QString> &guideIds, int inser
     return before != childIds(*root, fls::scene::LayerKind::Guide);
 }
 
-void EditorState::pruneEmptyGroups() {
+QHash<QString, QString> EditorState::pruneRedundantGroups() {
+    QHash<QString, QString> replacements;
+
     if (!project_.root) {
-        return;
+        return replacements;
     }
     auto prune = [&](auto &self, fls::scene::Group &group) -> void {
         for (int i = static_cast<int>(group.children.size()) - 1; i >= 0; --i) {
@@ -249,13 +252,50 @@ void EditorState::pruneEmptyGroups() {
             }
             auto &childGroup = static_cast<fls::scene::Group &>(*group.children[i]);
             self(self, childGroup);
-            if (childGroup.children.empty() && !childGroup.isLiverySection) {
-                group.takeAt(i);
+            if (childGroup.isLiverySection || childGroup.children.size() > 1) {
+                continue;
             }
+            const QString removedId = childGroup.id;
+            if (childGroup.children.empty()) {
+                group.takeAt(i);
+                replacements.insert(removedId, QString());
+                continue;
+            }
+            auto child = childGroup.takeAt(0);
+            if (!sceneLocalTransform(childGroup).isIdentity()) {
+                const fls::Matrix3 frame = fls::detail::multiply(childGroup.transform.matrix(), child->transform.matrix());
+                child->transform = fls::decomposeTransform2D(frame);
+                if (frame.m[0][0] == 0.0 && frame.m[1][0] == 0.0) {
+                    child->rotation = std::atan2(-frame.m[0][1], frame.m[1][1]) * 180.0 / std::acos(-1.0);
+                }
+            }
+            child->visible = child->visible && childGroup.visible;
+            child->locked = child->locked || childGroup.locked;
+            constexpr int kMaskFlag = 64;
+            if ((childGroup.flags & kMaskFlag) != 0) {
+                if (auto *shape = dynamic_cast<fls::scene::Shape *>(child.get())) {
+                    shape->mask = true;
+                } else if (auto *nested = dynamic_cast<fls::scene::Group *>(child.get())) {
+                    nested->flags |= kMaskFlag;
+                }
+            }
+            replacements.insert(removedId, child->id);
+            group.takeAt(i);
+            group.insert(i, std::move(child));
         }
     };
     prune(prune, *project_.root);
+    QVector<QString> selected;
+    for (const QString &id : selectedEntryIds_) {
+        const QString replacement = replacements.value(id, id);
+        if (!replacement.isEmpty() && !selected.contains(replacement)) {
+            selected.push_back(replacement);
+        }
+    }
+    selectedEntryIds_ = selected;
     invalidateProjectIndexCache();
+
+    return replacements;
 }
 
 std::unique_ptr<fls::scene::Layer> EditorState::takeEntry(const QString &entryId) {

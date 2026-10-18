@@ -318,14 +318,14 @@ QVector<QString> EditorState::leafLayerIdsForEntryCached(const QString &entryId,
 bool EditorState::entryHasLockedLayerCached(const QString &entryId, const ProjectIndexCache &cache) const {
     if (fls::scene::Layer *shape = cache.nodes.value(entryId, nullptr);
         shape != nullptr && shape->kind() != fls::scene::LayerKind::Group) {
-        return shape->locked || lockedLayerIds().contains(entryId);
+        return isLayerLocked(entryId);
     }
     if (fls::scene::Group *group = cache.groups.value(entryId, nullptr)) {
-        if (group->locked) {
+        if (isLayerLocked(entryId)) {
             return true;
         }
-        for (const QString &leaf : leafLayerIdsForEntryCached(entryId, cache)) {
-            if (lockedLayerIds().contains(leaf)) {
+        for (const auto &child : group->children) {
+            if (entryHasLockedLayerCached(child->id, cache)) {
                 return true;
             }
         }
@@ -376,7 +376,11 @@ void EditorState::setModified(bool modified) {
 }
 
 bool EditorState::isLayerLocked(const QString &layerId) const {
-    return lockedLayerIds().contains(layerId);
+    for (const fls::scene::Layer *node = sceneNode(layerId); node != nullptr; node = node->parent()) {
+        if (node->locked) return true;
+    }
+
+    return false;
 }
 
 QSet<QString> EditorState::lockedLayerIds() const {

@@ -66,18 +66,17 @@ private:
     bool beginValueLabelDrag(const QString &property, QDoubleSpinBox *box, const QPoint &globalPos);
     void updateValueLabelDrag(const QPoint &globalPos);
     void endValueLabelDrag(bool commit);
-    void applySingle(QWidget *sender);
-    void applyMulti(QWidget *sender, const QString &property);
     bool isBoxSelection() const;
     void setBoxProxyFields(bool neutralTransformValues = true);
     QPointF selectionBoxCenter() const;
-    void applyBoxTransform(const QString &property, double fromValue, double toValue);
     void setSelectionColor(const std::array<quint8, 4> &color);
     void pickColor();
     void updateColorButton();
     QVector<std::array<quint8, 4>> selectionColors(bool colorableOnly) const;
     QVector<std::array<quint8, 4>> colorableSelectionColors() const;
 
+    QVector<QString> selectionEntryIds_;
+    QHash<QString, double> valueLabelNodeStartValues_;
     EditorState *state_ = nullptr;
     std::function<QSizeF(int)> spriteSizeFn_;
     std::function<QRectF(int)> shapeVisualBoundsFn_;
@@ -103,14 +102,9 @@ private:
     QDoubleSpinBox *valueLabelBox_ = nullptr;
     QPoint valueLabelStartGlobal_;
     double valueLabelBoxStartValue_ = 0.0;
-    QHash<QString, double> valueLabelLayerStartValues_;
-    QHash<QString, double> valueLabelGuideStartValues_;
-    QHash<QString, double> valueLabelGroupStartValues_;
     bool valueLabelBoxDrag_ = false;
     bool valueLabelUsesTransformCommand_ = false;
     QPointF valueLabelBoxCenter_;
-    QHash<QString, QTransform> valueLabelLayerStartTransforms_;
-    QHash<QString, QTransform> valueLabelGroupStartFrames_;
     QSet<QString> valueLabelLayerIds_;
     QSet<QString> valueLabelGuideIds_;
     QVector<QString> valueLabelGroupIds_;

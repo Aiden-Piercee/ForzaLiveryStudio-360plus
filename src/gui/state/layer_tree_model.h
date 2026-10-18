@@ -51,9 +51,11 @@ public:
     Qt::DropActions supportedDropActions() const override;
     QStringList mimeTypes() const override;
     QMimeData *mimeData(const QModelIndexList &indexes) const override;
+    bool canDropMimeData(const QMimeData *data, Qt::DropAction action, int row, int column, const QModelIndex &parent) const override;
     bool dropMimeData(const QMimeData *data, Qt::DropAction action, int row, int column, const QModelIndex &parent) override;
 
 private:
+    std::optional<EditorCommand> dropCommand(const QMimeData *data, Qt::DropAction action, int row, int column, const QModelIndex &parent) const;
     QStandardItem *itemForId(const ProjectLookup &lookup, const QString &id, bool ancestorLocked = false) const;
     QIcon previewIconForNode(const fls::scene::Layer &node) const;
     void populateGroup(const ProjectLookup &lookup, const fls::scene::Group &group);

@@ -112,14 +112,42 @@ void LayerTreeView::mousePressEvent(QMouseEvent *event) {
             }
         }
     }
+    const QModelIndex index = indexAt(event->position().toPoint());
+    if (event->button() == Qt::LeftButton && index.isValid()
+        && isBadgePoint(visualRect(index), event->position().toPoint(),
+                        index.data(LayerTreeModel::IsGuideRole).toBool() || index.data(LayerTreeModel::IsContourRole).toBool())) {
+        pressedBadgeIndex_ = index;
+        event->accept();
+        return;
+    }
     QTreeView::mousePressEvent(event);
+}
+
+void LayerTreeView::mouseReleaseEvent(QMouseEvent *event) {
+    if (pressedBadgeIndex_.isValid() && event->button() == Qt::LeftButton) {
+        const QModelIndex index = pressedBadgeIndex_;
+        pressedBadgeIndex_ = QPersistentModelIndex();
+        if (indexAt(event->position().toPoint()) == index) {
+            QStyleOptionViewItem option;
+            initViewItemOption(&option);
+            option.rect = visualRect(index);
+            if (selectionModel()->isSelected(index)) {
+                option.state |= QStyle::State_Selected;
+            }
+            itemDelegateForIndex(index)->editorEvent(event, model(), option, index);
+        }
+        event->accept();
+        return;
+    }
+    QTreeView::mouseReleaseEvent(event);
 }
 
 void LayerTreeView::mouseDoubleClickEvent(QMouseEvent *event) {
     if (event != nullptr) {
         const QModelIndex index = indexAt(event->position().toPoint());
         if (index.isValid()
-            && isBadgePoint(visualRect(index), event->position().toPoint(), index.data(LayerTreeModel::IsGuideRole).toBool())) {
+            && isBadgePoint(visualRect(index), event->position().toPoint(),
+                            index.data(LayerTreeModel::IsGuideRole).toBool() || index.data(LayerTreeModel::IsContourRole).toBool())) {
             event->accept();
             return;
         }
@@ -152,7 +180,8 @@ void LayerTreeView::dragMoveEvent(QDragMoveEvent *event) {
     QModelIndex parent;
     int row = -1;
     int indicatorY = -1;
-    if (dropTargetForPosition(event->position().toPoint(), &parent, &row, &indicatorY)) {
+    if (dropTargetForPosition(event->position().toPoint(), &parent, &row, &indicatorY)
+        && model()->canDropMimeData(event->mimeData(), Qt::MoveAction, row, 0, parent)) {
         setDropIndicatorY(indicatorY);
         event->setDropAction(Qt::MoveAction);
         event->accept();
@@ -316,74 +345,37 @@ void LayerTreeView::setDropIndicatorY(int y) {
 }
 
 bool LayerTreeView::dropTargetForPosition(const QPoint &position, QModelIndex *dropParent, int *dropRow, int *indicatorY) const {
-    if (model() == nullptr || selectionModel() == nullptr || dropParent == nullptr || dropRow == nullptr || indicatorY == nullptr) {
+    if (model() == nullptr || selectionModel() == nullptr || normalizedSelectedRows().isEmpty()) {
         return false;
     }
-
-    QString sourceParentId;
-    QModelIndex sourceParentIndex;
-    bool haveSourceParent = false;
-    bool haveDraggedRow = false;
-    QSet<QString> draggedIds;
-    for (const QModelIndex &index : normalizedSelectedRows()) {
-        if (!index.isValid()) {
-            continue;
-        }
-        const QString entryId = index.data(LayerTreeModel::EntryIdRole).toString();
-        if (entryId.isEmpty()) {
-            continue;
-        }
-        const QString rowParentId = parentIdForIndex(index);
-        if (!haveSourceParent) {
-            sourceParentId = rowParentId;
-            sourceParentIndex = index.parent();
-            haveSourceParent = true;
-        } else if (sourceParentId != rowParentId) {
-            return false;
-        }
-        draggedIds.insert(entryId);
-        haveDraggedRow = true;
-    }
-    if (!haveDraggedRow) {
-        return false;
-    }
-
-    const QModelIndex target = indexAt(position);
-    int targetRow = target.isValid() ? target.row() : model()->rowCount(QModelIndex());
-    int y = viewport()->height() - 2;
-    if (target.isValid()) {
-        const QRect rect = visualRect(target);
-        if (position.y() >= rect.center().y()) {
-            ++targetRow;
-            y = visualSubtreeRect(target).bottom();
-        } else {
-            y = rect.top();
-        }
-    }
-
-    const QString targetParentId = target.isValid() ? parentIdForIndex(target) : QString();
-    if (targetParentId != sourceParentId) {
-        return false;
-    }
-
+    QModelIndex target = indexAt(position);
     if (!target.isValid()) {
-        if (!sourceParentId.isEmpty()) {
-            return false;
-        }
         *dropParent = QModelIndex();
-        *dropRow = targetRow;
-        *indicatorY = y;
+        *dropRow = model()->rowCount();
+        *indicatorY = viewport()->height() - 2;
         return true;
     }
-
-    const QString targetId = target.data(LayerTreeModel::EntryIdRole).toString();
-    if (draggedIds.contains(targetId)) {
-        return false;
+    QRect rect = visualRect(target);
+    while (target.parent().isValid() && position.x() < rect.left() - indentation() / 2) {
+        target = target.parent();
+        rect = visualRect(target);
+    }
+    constexpr int kDropZoneDivisor = 4;
+    const bool inside = target.data(LayerTreeModel::IsGroupRole).toBool()
+        && position.x() >= rect.left()
+        && position.y() >= rect.top() + rect.height() / kDropZoneDivisor
+        && position.y() <= rect.bottom() - rect.height() / kDropZoneDivisor;
+    if (inside) {
+        *dropParent = target;
+        *dropRow = 0;
+        *indicatorY = rect.bottom();
+    } else {
+        const bool below = position.y() >= rect.center().y();
+        *dropParent = target.parent();
+        *dropRow = target.row() + (below ? 1 : 0);
+        *indicatorY = below ? visualSubtreeRect(target).bottom() : rect.top();
     }
 
-    *dropParent = sourceParentIndex;
-    *dropRow = targetRow;
-    *indicatorY = y;
     return true;
 }
 

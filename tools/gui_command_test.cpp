@@ -1,0 +1,675 @@
+#include "main_window.h"
+#include "editor_state.h"
+#include "layer_state_delegate.h"
+#include "property_panel.h"
+#include "scene_codec.h"
+#include "project_codec.h"
+#include "game_export.h"
+#include "cgroup_codec.h"
+#include "vinyl_decoder.h"
+#include "project_canvas.h"
+
+#include <limits>
+
+#include <QApplication>
+#include <QColorDialog>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QMouseEvent>
+#include <QTemporaryDir>
+#include <QTextStream>
+#include <QTimer>
+#include <cmath>
+#include <stdexcept>
+
+namespace {
+
+void require(bool condition, const QString &message) {
+    if (!condition) throw std::runtime_error(message.toStdString());
+}
+
+fls::scene::Layer *nodeIn(fls::scene::Group &group, const QString &id) {
+    if (group.id == id) return &group;
+    for (const auto &child : group.children) {
+        if (child->id == id) return child.get();
+        if (auto *nested = dynamic_cast<fls::scene::Group *>(child.get())) {
+            if (auto *node = nodeIn(*nested, id)) return node;
+        }
+    }
+    return nullptr;
+}
+
+std::unique_ptr<fls::scene::Shape> shape(const QString &id, double x) {
+    auto node = std::make_unique<fls::scene::Shape>();
+    node->id = id;
+    node->name = id;
+    node->setVectorShape(101);
+    node->x = x;
+    node->y = x * 0.6;
+    node->scaleX = 0.7;
+    node->scaleY = 1.3;
+    node->rotation = 13;
+    node->skew = -0.15;
+    node->color = {31, 67, 139, 255};
+    return node;
+}
+
+fls::Project fixture() {
+    fls::Project project;
+    fls::scene::ensureProjectSceneRoot(project);
+    auto source = std::make_unique<fls::scene::Group>();
+    source->id = source->name = QStringLiteral("source");
+    source->transform = {-30, 60, -1.8, 0.7, 37, 0.3};
+    auto inner = std::make_unique<fls::scene::Group>();
+    inner->id = inner->name = QStringLiteral("inner");
+    inner->transform = {20, -11, 1.4, 0.8, -17, -0.2};
+    auto a = shape(QStringLiteral("a"), -20);
+    a->mask = true;
+    inner->append(std::move(a));
+    inner->append(shape(QStringLiteral("b"), 20));
+    auto path = std::make_unique<fls::scene::ContourFigure>();
+    path->id = path->name = QStringLiteral("path");
+    path->data.points = {{{0, 0}}, {{15, 30}}, {{40, 0}}};
+    path->data.closed = true;
+    path->data.fillColor = QColor(40, 80, 120, 190);
+    inner->append(std::move(path));
+    auto guide = std::make_unique<fls::scene::GuideLayer>();
+    guide->id = guide->name = QStringLiteral("guide");
+    inner->append(std::move(guide));
+    source->append(std::move(inner));
+    source->append(shape(QStringLiteral("c"), 55));
+    auto destination = std::make_unique<fls::scene::Group>();
+    destination->id = destination->name = QStringLiteral("destination");
+    destination->transform = {100, -40, 0.6, 2.4, -22, -0.4};
+    destination->append(shape(QStringLiteral("d"), 70));
+    destination->append(shape(QStringLiteral("e"), 95));
+    project.root->append(std::move(source));
+    project.root->append(std::move(destination));
+    project.root->append(shape(QStringLiteral("loose"), 80));
+    project.root->append(shape(QStringLiteral("untouched"), -90));
+    return project;
+}
+
+QByteArray fingerprint(const fls::scene::Layer &node) {
+    fls::Project holder;
+    fls::scene::ensureProjectSceneRoot(holder);
+    auto copy = node.clone();
+    copy->transform = {};
+    holder.root->append(std::move(copy));
+    return fls::encodeProjectDocument(holder);
+}
+
+void sameWorld(const QTransform &expected, const QTransform &actual, const QString &label) {
+    for (const QPointF point : {QPointF(), QPointF(1, 0), QPointF(0, 1), QPointF(43, -29)}) {
+        require(QLineF(expected.map(point), actual.map(point)).length() < 1e-7, label + " changed its world transform");
+    }
+}
+
+void click(QWidget *widget, QPoint point, Qt::KeyboardModifiers modifiers = {}) {
+    const QPoint global = widget->mapToGlobal(point);
+    QMouseEvent press(QEvent::MouseButtonPress, point, global, Qt::LeftButton, Qt::LeftButton, modifiers);
+    QApplication::sendEvent(widget, &press);
+    QMouseEvent release(QEvent::MouseButtonRelease, point, global, Qt::LeftButton, Qt::NoButton, modifiers);
+    QApplication::sendEvent(widget, &release);
+    QApplication::processEvents();
+}
+
+struct Harness {
+    gui::MainWindow window;
+    gui::EditorState *state;
+    gui::LayerTreeView *tree;
+    gui::LayerTreeModel *model;
+    gui::PropertyPanel *properties = nullptr;
+    QVector<gui::EditorCommandType> commands;
+    QStringList actions;
+
+    Harness() {
+        state = window.findChild<gui::EditorState *>();
+        tree = window.findChild<gui::LayerTreeView *>();
+        require(state && tree, "main window is missing its state or Layers view");
+        model = dynamic_cast<gui::LayerTreeModel *>(tree->model());
+        for (QWidget *widget : window.findChildren<QWidget *>()) {
+            if (auto *panel = dynamic_cast<gui::PropertyPanel *>(widget)) properties = panel;
+        }
+        require(model && properties, "main window is missing its Layers model or Properties panel");
+        QObject::connect(state, &gui::EditorState::commandExecuted, state,
+            [this](gui::EditorCommandType type, const QVector<QString> &) { commands.push_back(type); });
+        QObject::connect(state, &gui::EditorState::editActionRequested, state,
+            [this](const QString &id) { actions.push_back(id); });
+    }
+
+    void reset(fls::Project project = fixture()) {
+        state->setProject(std::move(project));
+        state->noteProjectStructureChanged();
+        tree->resize(680, 740);
+        tree->expandAll();
+        tree->doItemsLayout();
+        QApplication::processEvents();
+        commands.clear();
+        actions.clear();
+        validate();
+    }
+
+    void select(const QVector<QString> &ids) {
+        gui::EditorCommand command;
+        command.type = gui::EditorCommandType::Selection;
+        command.entries = ids;
+        require(state->executeCommand(command), "selection command failed");
+        QApplication::processEvents();
+        commands.clear();
+    }
+
+    QModelIndex index(const QString &id, const QModelIndex &parent = {}) const {
+        for (int row = 0; row < model->rowCount(parent); ++row) {
+            const QModelIndex item = model->index(row, 0, parent);
+            if (item.data(gui::LayerTreeModel::EntryIdRole).toString() == id) return item;
+            const QModelIndex nested = index(id, item);
+            if (nested.isValid()) return nested;
+        }
+        return {};
+    }
+
+    void trigger(const QString &id) {
+        QAction *action = window.findChild<QAction *>(id);
+        require(action && action->property("editorCommandAction").toString() == id, "Edit action bypasses command routing: " + id);
+        action->trigger();
+        QApplication::processEvents();
+        require(actions.contains(id), "Edit action did not reach editor state: " + id);
+    }
+
+    QCheckBox *flag(const QString &property) {
+        auto *box = properties->findChild<QCheckBox *>("property." + property);
+        require(box && box->isEnabled(), "property flag is unavailable: " + property);
+        return box;
+    }
+
+    void clickFlag(const QString &property) {
+        QCheckBox *box = flag(property);
+        click(box, QPoint(8, box->height() / 2));
+        require(commands.contains(gui::EditorCommandType::Property), "property checkbox bypassed editor commands: " + property);
+        validate();
+    }
+
+    void badge(const QString &id, int slot) {
+        const QModelIndex item = index(id);
+        require(item.isValid(), "missing badge row: " + id);
+        const QRect rect = tree->visualRect(item);
+        const int right = rect.right() - gui::kLayerBadgeRightMargin
+            - slot * (gui::kLayerBadgeSize + gui::kLayerBadgeGap);
+        click(tree->viewport(), QPoint(right - gui::kLayerBadgeSize / 2, rect.center().y()));
+        require(commands.contains(gui::EditorCommandType::Property), "Layers badge bypassed editor commands: " + id);
+        validate();
+    }
+
+    bool drop(const QVector<QString> &ids, const QString &target, bool inside = true) {
+        select(ids);
+        tree->expandAll();
+        tree->doItemsLayout();
+        const QModelIndex item = index(target);
+        require(item.isValid(), "missing drop target: " + target);
+        const QRect rect = tree->visualRect(item);
+        const QPoint position(rect.left() + 36, inside ? rect.center().y() : rect.top() + 1);
+        QModelIndexList indexes;
+        for (const QString &id : ids) indexes.push_back(index(id));
+        std::unique_ptr<QMimeData> mime(model->mimeData(indexes));
+        QDragEnterEvent enter(position, Qt::MoveAction, mime.get(), Qt::LeftButton, {});
+        QApplication::sendEvent(tree->viewport(), &enter);
+        QDragMoveEvent move(position, Qt::MoveAction, mime.get(), Qt::LeftButton, {});
+        QApplication::sendEvent(tree->viewport(), &move);
+        QDropEvent event(position, Qt::MoveAction, mime.get(), Qt::LeftButton, {});
+        QApplication::sendEvent(tree->viewport(), &event);
+        QApplication::processEvents();
+        validate();
+        if (event.isAccepted()) require(commands.contains(gui::EditorCommandType::MoveEntries), "drop bypassed editor commands");
+        return event.isAccepted();
+    }
+
+    void validate() const {
+        QSet<QString> seen;
+        const auto check = [&](auto &&self, const fls::scene::Group &group, const QModelIndex &parent) -> void {
+            require(model->rowCount(parent) == static_cast<int>(group.children.size()), "tree row count differs from state");
+            for (int row = 0; row < model->rowCount(parent); ++row) {
+                const QModelIndex item = model->index(row, 0, parent);
+                const auto *node = group.children[group.children.size() - 1 - row].get();
+                require(item.isValid() && item.parent() == parent, "invalid model parent/index relationship");
+                require(item.data(gui::LayerTreeModel::EntryIdRole).toString() == node->id, "tree order differs from state draw order");
+                require(!seen.contains(node->id), "tree contains a duplicate node");
+                require(node->parent() == &group && state->sceneNode(node->id) == node, "scene parent or index cache is stale");
+                seen.insert(node->id);
+                if (const auto *nested = dynamic_cast<const fls::scene::Group *>(node)) {
+                    require(nested->isLiverySection || nested->children.size() >= 2, "Forza group has fewer than two children");
+                    self(self, *nested, item);
+                } else require(model->rowCount(item) == 0, "leaf item has tree children");
+            }
+        };
+        const fls::scene::Group *displayed = state->project()->isLivery
+            ? state->groupForId(state->activeSectionId_) : state->project()->root.get();
+        require(displayed != nullptr, "displayed tree root is missing");
+        check(check, *displayed, QModelIndex());
+    }
+};
+
+void flags(Harness &h) {
+    h.reset();
+    h.select({"source", "loose"});
+    require(h.flag("mask")->checkState() == Qt::PartiallyChecked, "Properties did not display a mixed mask selection");
+    h.clickFlag("mask");
+    for (const QString &id : {"a", "b", "c", "loose"})
+        require(static_cast<const fls::scene::Shape *>(h.state->sceneNode(id))->mask, "mask did not propagate to " + id);
+    require(!static_cast<const fls::scene::Shape *>(h.state->sceneNode("d"))->mask, "mask changed an unselected shape");
+    require(h.index("source").data(gui::LayerTreeModel::MaskRole).toBool(), "guide/path incorrectly keeps the group mask badge off");
+    h.trigger("undo");
+    require(!static_cast<const fls::scene::Shape *>(h.state->sceneNode("b"))->mask, "mask undo failed");
+    h.trigger("redo");
+    require(static_cast<const fls::scene::Shape *>(h.state->sceneNode("b"))->mask, "mask redo failed");
+    h.badge("source", 1);
+    for (const QString &id : {"a", "b", "c", "loose"})
+        require(!static_cast<const fls::scene::Shape *>(h.state->sceneNode(id))->mask, "selected mask badge skipped " + id);
+    require(h.state->selectedLayerIds().contains("loose"), "badge click collapsed the selection");
+    h.clickFlag("visible");
+    for (const QString &id : {"source", "inner", "a", "b", "c", "path", "guide", "loose"})
+        require(!h.state->sceneNode(id)->visible, "visibility did not propagate to " + id);
+    h.badge("source", 2);
+    require(h.state->sceneNode("loose")->visible && h.state->sceneNode("guide")->visible, "selected visibility badge skipped selected items");
+    h.clickFlag("locked");
+    require(h.state->isLayerLocked("loose") && h.state->isLayerLocked("a"), "lock did not propagate");
+    require(!h.state->isLayerLocked("untouched"), "lock changed an unselected shape");
+    h.badge("source", 0);
+    require(!h.state->isLayerLocked("loose") && !h.state->isLayerLocked("a"), "bulk unlock failed");
+    h.badge("untouched", 1);
+    require(static_cast<const fls::scene::Shape *>(h.state->sceneNode("untouched"))->mask, "unselected badge did not affect its own row");
+    require(!static_cast<const fls::scene::Shape *>(h.state->sceneNode("loose"))->mask, "unselected badge unexpectedly changed the selection");
+    h.reset();
+    const QRect row = h.tree->visualRect(h.index("loose"));
+    click(h.tree->viewport(), QPoint(row.left() + 44, row.center().y()));
+    require(h.commands.contains(gui::EditorCommandType::Selection) && h.state->selectedLayerIds() == QSet<QString>{"loose"},
+            "Layers row click bypassed state selection commands");
+}
+
+void properties(Harness &h) {
+    const QStringList names{"x", "y", "scaleX", "scaleY", "rotation", "skew", "opacity"};
+    const QList<double> values{44.5, -19.25, -1.3, 2.2, 128.0, 0.42, 0.37};
+    for (int index = 0; index < names.size(); ++index) {
+        h.reset();
+        h.select({"loose"});
+        auto expected = *h.state->project();
+        auto *node = static_cast<fls::scene::Shape *>(nodeIn(*expected.root, "loose"));
+        const QString name = names[index];
+        const double value = values[index];
+        if (name == "x") node->x = value;
+        else if (name == "y") node->y = value;
+        else if (name == "scaleX") node->scaleX = value;
+        else if (name == "scaleY") node->scaleY = value;
+        else if (name == "rotation") node->rotation = value;
+        else if (name == "skew") node->skew = value;
+        else { node->opacity = value; node->color[3] = static_cast<quint8>(std::lround(value * 255.0)); }
+        auto *control = h.properties->findChild<QDoubleSpinBox *>("property." + name);
+        require(control && control->isEnabled(), "numeric property is unavailable: " + name);
+        const QByteArray before = fls::encodeProjectDocument(*h.state->project());
+        control->setValue(value);
+        QApplication::processEvents();
+        require(h.commands.contains(gui::EditorCommandType::Property), "numeric property bypassed editor commands: " + name);
+        require(fls::encodeProjectDocument(expected) == fls::encodeProjectDocument(*h.state->project()), "numeric property changed unrelated data: " + name);
+        h.trigger("undo");
+        require(before == fls::encodeProjectDocument(*h.state->project()), "numeric property undo failed: " + name);
+        h.trigger("redo");
+        require(fls::encodeProjectDocument(expected) == fls::encodeProjectDocument(*h.state->project()), "numeric property redo failed: " + name);
+    }
+    h.reset(); h.select({"loose"});
+    auto *name = h.properties->findChild<QLineEdit *>("property.name");
+    name->setText("Renamed");
+    QMetaObject::invokeMethod(name, "editingFinished", Qt::DirectConnection);
+    require(h.state->sceneNode("loose")->name == "Renamed", "name edit did not propagate");
+    auto *shapeId = h.properties->findChild<QSpinBox *>("property.shapeId");
+    shapeId->setValue(102);
+    require(static_cast<fls::scene::Shape *>(h.state->sceneNode("loose"))->shapeId == 102, "shape ID edit did not propagate");
+    h.reset(); h.select({"source", "loose"});
+    require(name->text().isEmpty(), "mixed group/shape names were not displayed as mixed");
+    name->setText("Selected artwork");
+    QMetaObject::invokeMethod(name, "editingFinished", Qt::DirectConnection);
+    require(h.state->sceneNode("source")->name == "Selected artwork" && h.state->sceneNode("loose")->name == "Selected artwork",
+            "name edit skipped part of a mixed selection");
+    require(h.state->sceneNode("a")->name == "a", "group rename also renamed its contents");
+    h.reset(); h.select({"loose"});
+    const QByteArray beforeDrag = fls::encodeProjectDocument(*h.state->project());
+    QWidget *label = h.properties->findChild<QWidget *>("property.label.x");
+    require(label != nullptr, "position drag label is missing");
+    const QPoint start(8, 8), end(8, -12);
+    QMouseEvent press(QEvent::MouseButtonPress, start, label->mapToGlobal(start), Qt::LeftButton, Qt::LeftButton, {});
+    QApplication::sendEvent(label, &press);
+    QMouseEvent move(QEvent::MouseMove, end, label->mapToGlobal(end), Qt::NoButton, Qt::LeftButton, {});
+    QApplication::sendEvent(label, &move);
+    QMouseEvent release(QEvent::MouseButtonRelease, end, label->mapToGlobal(end), Qt::LeftButton, Qt::NoButton, {});
+    QApplication::sendEvent(label, &release);
+    require(h.commands.contains(gui::EditorCommandType::Property) && h.state->sceneNode("loose")->x != 80,
+            "numeric label drag bypassed state commands");
+    require(h.state->undoStack_.size() == 1, "numeric drag produced multiple undo entries");
+    h.trigger("undo");
+    require(beforeDrag == fls::encodeProjectDocument(*h.state->project()), "numeric drag undo failed");
+    for (bool accept : {false, true}) {
+        h.reset(); h.select({"source", "loose"});
+        const QByteArray before = fls::encodeProjectDocument(*h.state->project());
+        bool visited = false;
+        QTimer::singleShot(0, [&]() {
+            auto *dialog = dynamic_cast<QColorDialog *>(QApplication::activeModalWidget());
+            require(dialog != nullptr, "color button did not open its dialog");
+            visited = true;
+            dialog->setCurrentColor(QColor(110, 170, 210, 151));
+            if (accept) dialog->accept(); else dialog->reject();
+        });
+        auto *color = h.properties->findChild<QPushButton *>("property.color");
+        color->click();
+        require(visited, "color dialog test did not execute");
+        if (accept) {
+            for (const QString &id : {"a", "b", "c", "loose"})
+                require(static_cast<const fls::scene::Shape *>(h.state->sceneNode(id))->color == std::array<quint8, 4>{210, 170, 110, 151}, "color edit skipped " + id);
+            require(h.state->undoStack_.size() == 1, "color gesture produced multiple undo entries");
+            h.trigger("undo");
+        }
+        require(before == fls::encodeProjectDocument(*h.state->project()), "color cancel/undo changed the project");
+    }
+}
+
+void reparent(Harness &h) {
+    h.reset();
+    const QTransform innerWorld = gui::sceneWorldTransform(*h.state->sceneNode("inner"));
+    const QByteArray innerProperties = fingerprint(*h.state->sceneNode("inner"));
+    require(h.drop({"inner"}, "destination"), "group reparent was rejected");
+    require(h.state->parentGroupForEntry("inner") == "destination", "group was not added to the new parent");
+    sameWorld(innerWorld, gui::sceneWorldTransform(*h.state->sceneNode("inner")), "reparented group");
+    require(fingerprint(*h.state->sceneNode("inner")) == innerProperties, "reparent changed authored properties or child transforms");
+    require(h.index("inner").row() < h.index("d").row(), "group dropped above a shape did not draw above it");
+    require(h.drop({"inner"}, "untouched", false), "moving group to root was rejected");
+    require(h.state->parentGroupForEntry("inner").isEmpty(), "group was not moved to root");
+    require(h.index("inner").row() == 0, "moving to the top did not change draw order");
+    sameWorld(innerWorld, gui::sceneWorldTransform(*h.state->sceneNode("inner")), "root group");
+    h.trigger("undo");
+    require(h.state->parentGroupForEntry("inner") == "destination", "undo did not restore the parent");
+    h.trigger("redo");
+    require(h.state->parentGroupForEntry("inner").isEmpty(), "redo did not restore root placement");
+    const QByteArray beforeCycle = fls::encodeProjectDocument(*h.state->project());
+    require(!h.drop({"inner"}, "inner"), "group accepted itself as parent");
+    require(beforeCycle == fls::encodeProjectDocument(*h.state->project()), "invalid drop changed the project");
+    h.reset();
+    require(!h.drop({"source"}, "inner"), "group accepted a descendant as parent");
+    require(h.drop({"a", "c"}, "destination"), "selection from different parents was rejected");
+    require(h.state->parentGroupForEntry("a") == "destination" && h.state->parentGroupForEntry("c") == "destination", "multi-parent move skipped an item");
+    require(h.index("c").row() < h.index("a").row(), "multi-parent move reversed relative draw order");
+    h.reset();
+    const QTransform original = gui::sceneWorldTransform(*h.state->sceneNode("c"));
+    const QByteArray authored = fingerprint(*h.state->sceneNode("c"));
+    require(h.drop({"c"}, "destination"), "shape reparent was rejected");
+    require(h.drop({"inner"}, "destination"), "last group reparent was rejected");
+    require(h.state->sceneNode("source") == nullptr, "empty source group was retained");
+    for (int step = 0; step < 12; ++step) {
+        require(h.drop({"c"}, step % 2 == 0 ? "inner" : "destination"), "repeated reparent failed");
+        sameWorld(original, gui::sceneWorldTransform(*h.state->sceneNode("c")), "repeated shape move");
+        require(fingerprint(*h.state->sceneNode("c")) == authored, "repeated move changed authored properties");
+    }
+    QTemporaryDir exported;
+    const QString folder = exported.filePath("group");
+    fls::exportGameGroup(*h.state->project(), folder, fls::ExportGameVersion::Horizon5);
+    auto imported = fls::importCGroupNested(folder);
+    const auto native = fls::VinylTreeDecoder().decodeGroup(fls::readCGroupPayload(folder));
+    require(fls::validateTree(native).isEmpty(), "reparented export contains an invalid native tree");
+    QVector<bool> nativeMasks;
+    const auto collectMasks = [&](auto &&self, const fls::VinylGroup &group, bool inherited) -> void {
+        for (const auto &item : group.items) {
+            if (item.isShape()) nativeMasks.push_back(inherited || group.isMask || std::get<fls::VinylShape>(item.value).isMask);
+            else self(self, *std::get<fls::VinylGroupPtr>(item.value), inherited || group.isMask);
+        }
+    };
+    collectMasks(collectMasks, native, false);
+    const auto originalShapes = gui::sceneShapeLeaves(*h.state->project()->root);
+    const auto importedShapes = gui::sceneShapeLeaves(*imported.root);
+    require(originalShapes.size() == importedShapes.size(), "reparented export lost shapes");
+    const QPointF originalOrigin = gui::sceneWorldTransform(*originalShapes.front()).map(QPointF());
+    const QPointF importedOrigin = gui::sceneWorldTransform(*importedShapes.front()).map(QPointF());
+    for (int index = 0; index < originalShapes.size(); ++index) {
+        const auto *before = originalShapes[index];
+        const auto *after = importedShapes[index];
+        require(index < nativeMasks.size() && before->mask == nativeMasks[index], "reparented export changed mask flags");
+        require(before->color == after->color && before->shapeId == after->shapeId,
+                "reparented export changed colors or draw order");
+        for (const QPointF point : {QPointF(), QPointF(1, 0), QPointF(0, 1)}) {
+            const QPointF expected = gui::sceneWorldTransform(*before).map(point) - originalOrigin;
+            const QPointF actual = gui::sceneWorldTransform(*after).map(point) - importedOrigin;
+            require(QLineF(expected, actual).length() < 0.03, "reparented export changed artwork placement");
+        }
+    }
+    auto restored = fls::decodeProjectDocument(fls::encodeProjectDocument(*h.state->project()));
+    sameWorld(original, gui::sceneWorldTransform(*nodeIn(*restored.root, "c")), "saved/reloaded shape");
+    require(fingerprint(*nodeIn(*restored.root, "c")) == authored, "save/reload changed authored properties");
+}
+
+void singleChildGroups(Harness &h) {
+    for (const QString &action : {QString("delete_selected"), QString("cut")}) {
+        h.reset();
+        const QByteArray before = fls::encodeProjectDocument(*h.state->project());
+        const QTransform world = gui::sceneWorldTransform(*h.state->sceneNode("e"));
+        const QByteArray authored = fingerprint(*h.state->sceneNode("e"));
+        const int row = h.index("destination").row();
+        h.select({"d"}); h.trigger(action);
+        require(h.state->sceneNode("destination") == nullptr && h.state->sceneNode("d") == nullptr,
+                "single-child group was retained after " + action);
+        require(h.state->parentGroupForEntry("e").isEmpty() && h.index("e").row() == row,
+                "survivor changed parent position or draw order after " + action);
+        sameWorld(world, gui::sceneWorldTransform(*h.state->sceneNode("e")), "deleted group survivor");
+        require(fingerprint(*h.state->sceneNode("e")) == authored, "group collapse changed child properties");
+        require(h.state->undoStack_.size() == 1, "group collapse created a separate undo entry");
+        h.validate();
+        h.trigger("undo");
+        require(before == fls::encodeProjectDocument(*h.state->project()), "group collapse undo failed");
+        h.trigger("redo");
+        require(h.state->sceneNode("destination") == nullptr, "group collapse redo failed");
+        h.validate();
+    }
+    h.reset();
+    const QTransform world = gui::sceneWorldTransform(*h.state->sceneNode("c"));
+    require(h.drop({"inner"}, "destination"), "move that collapses the source was rejected");
+    require(h.state->sceneNode("source") == nullptr && h.state->parentGroupForEntry("c").isEmpty(),
+            "reparenting retained a source with one child");
+    sameWorld(world, gui::sceneWorldTransform(*h.state->sceneNode("c")), "move survivor");
+    require(h.state->selectionEntries() == QVector<QString>{"inner"}, "collapse lost the moved group selection");
+    h.reset();
+    const QTransform innerWorld = gui::sceneWorldTransform(*h.state->sceneNode("inner"));
+    const QByteArray innerProperties = fingerprint(*h.state->sceneNode("inner"));
+    h.select({"c"}); h.trigger("delete_selected");
+    require(h.state->sceneNode("source") == nullptr && h.state->parentGroupForEntry("inner").isEmpty(),
+            "surviving group was not promoted");
+    sameWorld(innerWorld, gui::sceneWorldTransform(*h.state->sceneNode("inner")), "promoted group");
+    require(fingerprint(*h.state->sceneNode("inner")) == innerProperties, "promoting a group changed its descendants");
+    h.validate();
+
+    auto project = fixture();
+    auto *source = static_cast<fls::scene::Group *>(nodeIn(*project.root, "source"));
+    auto *inner = static_cast<fls::scene::Group *>(nodeIn(*project.root, "inner"));
+    inner->children.clear();
+    inner->append(shape("survivor", 10));
+    inner->append(shape("remove-inner", -10));
+    source->visible = false;
+    source->locked = true;
+    source->flags = 64;
+    auto *survivor = nodeIn(*project.root, "survivor");
+    const QTransform cascadeWorld = gui::sceneWorldTransform(*survivor);
+    h.reset(std::move(project));
+    const QByteArray before = fls::encodeProjectDocument(*h.state->project());
+    h.select({"source"});
+    h.state->beginProjectEdit();
+    h.state->removeEntries({"c", "remove-inner"});
+    h.state->commitProjectEdit();
+    h.state->noteProjectStructureChanged();
+    require(h.state->sceneNode("source") == nullptr && h.state->sceneNode("inner") == nullptr,
+            "nested singleton groups were retained");
+    sameWorld(cascadeWorld, gui::sceneWorldTransform(*h.state->sceneNode("survivor")), "nested collapse");
+    require(h.state->selectionEntries() == QVector<QString>{"survivor"}, "collapsed group selection was not remapped");
+    require(!h.state->sceneNode("survivor")->visible && h.state->isLayerLocked("survivor")
+            && static_cast<const fls::scene::Shape *>(h.state->sceneNode("survivor"))->mask,
+            "collapsed group lost inherited visibility, lock, or mask state");
+    h.validate();
+    h.trigger("undo");
+    require(before == fls::encodeProjectDocument(*h.state->project()), "nested collapse undo failed");
+    require(h.state->selectionEntries() == QVector<QString>{"source"}, "undo did not restore the selected group");
+    h.trigger("redo");
+    h.validate();
+}
+
+void rejectedMoves(Harness &h) {
+    for (bool locked : {false, true}) {
+        auto project = fixture();
+        auto *destination = nodeIn(*project.root, "destination");
+        if (locked) destination->locked = true;
+        else destination->scaleX = 0;
+        h.reset(std::move(project));
+        const QByteArray before = fls::encodeProjectDocument(*h.state->project());
+        require(!h.drop({"inner", "loose"}, "destination"), "invalid destination accepted a drop");
+        require(before == fls::encodeProjectDocument(*h.state->project()) && h.state->undoStack_.isEmpty(),
+                "rejected drop changed the document or history");
+    }
+    h.reset();
+    const QByteArray before = fls::encodeProjectDocument(*h.state->project());
+    gui::EditorCommand command;
+    command.type = gui::EditorCommandType::LocalTransforms;
+    command.entries = {"loose"};
+    command.transforms.insert("untouched", {});
+    require(!h.state->executeCommand(command), "transform command edited a node outside its targets");
+    command.transforms.clear();
+    auto invalid = h.state->sceneNode("loose")->transform;
+    invalid.y = std::numeric_limits<double>::quiet_NaN();
+    command.transforms.insert("loose", invalid);
+    require(!h.state->executeCommand(command), "transform command accepted a nonfinite value");
+    require(before == fls::encodeProjectDocument(*h.state->project()) && h.state->undoStack_.isEmpty(),
+            "invalid transform command changed the document or history");
+    require(h.drop({"loose"}, "untouched", false), "same-parent reorder was rejected");
+    require(h.index("loose").row() == 0, "same-parent reorder did not update draw order");
+}
+
+void liveryMoves(Harness &h) {
+    auto project = fixture();
+    auto section = std::make_unique<fls::scene::Group>();
+    section->id = "section";
+    section->isLiverySection = true;
+    section->liverySectionSlot = 0;
+    section->transform = {15, -12, 1.2, 0.8, 20, -0.15};
+    while (!project.root->children.empty()) section->append(project.root->takeAt(0));
+    project.root->append(std::move(section));
+    auto empty = std::make_unique<fls::scene::Group>();
+    empty->id = "empty-section";
+    empty->isLiverySection = true;
+    empty->liverySectionSlot = 1;
+    project.root->append(std::move(empty));
+    project.isLivery = true;
+    h.reset(std::move(project));
+    const QTransform before = gui::sceneWorldTransform(*h.state->sceneNode("inner"));
+    require(h.drop({"inner"}, "untouched", false), "moving group to section root was rejected");
+    require(h.state->parentGroupForEntry("inner") == "section", "drop escaped the section into the livery project root");
+    sameWorld(before, gui::sceneWorldTransform(*h.state->sceneNode("inner")), "section root move");
+    require(h.drop({"c"}, "inner"), "section shape reparent was rejected");
+    require(h.state->sceneNode("source") == nullptr, "empty group was retained in a livery section");
+    require(h.state->sceneNode("empty-section") != nullptr, "empty livery section was pruned");
+    h.trigger("undo"); h.trigger("redo");
+    h.validate();
+    h.reset();
+    QApplication::setActiveWindow(&h.window);
+    h.select({"loose"});
+    QKeyEvent remove(QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier);
+    QApplication::sendEvent(h.tree, &remove);
+    require(h.actions.contains("delete_selected") && h.commands.contains(gui::EditorCommandType::Remove)
+            && h.state->sceneNode("loose") == nullptr, "Delete shortcut bypassed state commands");
+    QKeyEvent undo(QEvent::KeyPress, Qt::Key_Z, Qt::ControlModifier);
+    QApplication::sendEvent(h.tree, &undo);
+    require(h.commands.contains(gui::EditorCommandType::Undo) && h.state->sceneNode("loose") != nullptr,
+            "Undo shortcut bypassed state commands");
+    h.validate();
+    QApplication::setActiveWindow(nullptr);
+}
+
+void actions(Harness &h) {
+    const QStringList expected{"undo", "redo", "copy", "cut", "paste", "group_ungroup", "ungroup_flat",
+        "fold_all_groups", "delete_selected", "stamp", "flip_selection", "center_view_on_selection",
+        "fit_view_to_visible_area", "save_pen_figure", "new_pen_contour", "align_top", "align_bottom",
+        "align_left", "align_right", "align_centre", "align_vertical_centre", "distribute_vertical", "distribute_horizontal"};
+    QStringList registered;
+    for (QAction *action : h.window.findChildren<QAction *>()) {
+        if (action->property("editorCommandAction").isValid()) registered.push_back(action->objectName());
+    }
+    QStringList sorted = expected;
+    registered.sort(); sorted.sort();
+    require(registered == sorted, "Edit action coverage is incomplete");
+    for (const QString &id : expected) {
+        h.reset();
+        h.select(id.startsWith("align_") || id.startsWith("distribute_") ? QVector<QString>{"loose", "untouched", "d"}
+            : id == "group_ungroup" ? QVector<QString>{"a", "b"}
+            : id == "ungroup_flat" ? QVector<QString>{"source"} : QVector<QString>{"loose"});
+        if (id == "paste") {
+            gui::EditorCommand copy;
+            copy.type = gui::EditorCommandType::Copy;
+            copy.entries = {"loose"};
+            require(h.state->executeCommand(copy), "copy before paste failed");
+        }
+        h.trigger(id);
+        require(h.commands.contains(gui::EditorCommandType::Action), "Edit action did not execute its state event: " + id);
+        if (id.startsWith("align_") || id.startsWith("distribute_") || id == "flip_selection")
+            require(h.commands.contains(gui::EditorCommandType::LocalTransforms) && h.state->undoStack_.size() == 1,
+                    "canvas edit bypassed state transform commands: " + id);
+        if (id == "copy") require(h.state->clipboard() != nullptr, "Copy did not update state clipboard");
+        if (id == "cut" || id == "delete_selected") require(h.state->sceneNode("loose") == nullptr, "edit action did not remove selected shape: " + id);
+        if (id == "stamp" || id == "paste") require(gui::sceneShapeLeaves(*h.state->project()->root).size() == 8, "edit action did not insert a shape: " + id);
+        if (id == "group_ungroup") require(h.state->parentGroupForEntry("a") == h.state->parentGroupForEntry("b")
+            && h.state->parentGroupForEntry("a") != "inner", "Group did not create a new group");
+        if (id == "ungroup_flat") require(h.state->sceneNode("source") == nullptr && h.state->parentGroupForEntry("a").isEmpty(), "flat ungroup did not rebuild parent structure");
+        h.validate();
+    }
+    h.reset(); h.select({"loose"});
+    const QByteArray beforeFlip = fls::encodeProjectDocument(*h.state->project());
+    for (int step = 0; step < 4; ++step) h.trigger("flip_selection");
+    require(beforeFlip == fls::encodeProjectDocument(*h.state->project()), "four flips did not restore the exact original transform");
+    h.reset();
+    gui::ProjectCanvas *canvas = nullptr;
+    for (QWidget *widget : h.window.findChildren<QWidget *>()) {
+        if (auto *found = dynamic_cast<gui::ProjectCanvas *>(widget)) canvas = found;
+    }
+    require(canvas != nullptr, "canvas is missing");
+    h.trigger("new_pen_contour");
+    canvas->resize(800, 600);
+    click(canvas, QPoint(200, 200));
+    click(canvas, QPoint(350, 280));
+    click(canvas, QPoint(400, 180));
+    const QByteArray beforeSave = fls::encodeProjectDocument(*h.state->project());
+    h.trigger("save_pen_figure");
+    require(h.commands.contains(gui::EditorCommandType::Insert), "Save path bypassed state insertion commands");
+    h.validate();
+    h.trigger("undo");
+    require(beforeSave == fls::encodeProjectDocument(*h.state->project()), "Save path undo did not restore the document");
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+    qputenv("QT_QPA_PLATFORM", "minimal");
+    QApplication application(argc, argv);
+    QCoreApplication::setOrganizationName("ForzaLiveryStudioTests");
+    QCoreApplication::setApplicationName("GuiCommands-" + QUuid::createUuid().toString(QUuid::WithoutBraces));
+    QTemporaryDir settings;
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+    QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, settings.path());
+    QSettings().setValue("ui/behavior/autosaveIntervalMinutes", 0);
+    QSettings().setValue("ui/behavior/pasteInPlace", true);
+    try {
+        Harness harness;
+        flags(harness);
+        properties(harness);
+        reparent(harness);
+        singleChildGroups(harness);
+        rejectedMoves(harness);
+        actions(harness);
+        liveryMoves(harness);
+    } catch (const std::exception &error) {
+        QTextStream(stderr) << error.what() << '\n';
+        return 1;
+    }
+    QTextStream(stdout) << "GUI command propagation, history, reparenting and draw order checks passed\n";
+    return 0;
+}

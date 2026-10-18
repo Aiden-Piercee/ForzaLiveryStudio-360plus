@@ -719,8 +719,16 @@ exports grouped `C_group` folders and `C_livery` folders.
   output ordinals, and per-component topology and colour metrics.
 - Store project-specific color swatches in the `.3so` project document.
 - Manage layer/group trees with thumbnails, visibility/mask/lock badges,
-  grouping, ungrouping, deletion, sibling reordering, copy/cut/paste, duplicate,
-  and stamp. Livery section labels show live leaf counts after structural edits;
+  grouping, ungrouping, deletion, reordering, reparenting, copy/cut/paste, duplicate,
+  and stamp. Drag shapes or groups between parents or to the displayed root;
+  rows above other rows draw above them. Reparenting preserves authored properties
+  and world transforms by recalculating local transforms. Ordinary groups with
+  fewer than two children are removed; a remaining child inherits the group
+  transform and effective state at the same draw position. Livery section
+  containers remain. Visibility, mask, and lock
+  edits in Properties and selected-row badges apply to the entire selection.
+  An unselected-row badge edits that row without replacing the selection.
+  Livery section labels show live leaf counts after structural edits;
   switching sections reuses cached tree rows and keeps root guide layers available.
 - Browse and insert vector shapes from the Shapes dock.
 - Place text as a line of vector font glyphs (toolbar **Place Text**): pick one of
@@ -1096,11 +1104,16 @@ The codebase is designed to build on both Windows (via vcpkg) and Linux (via sys
     plus app settings, theming, dock title chrome (including
     the dock-area collapse buttons), asset/icon loading, opt-in perf timing, and
     cross-cutting UI constants.
-- `src/gui/state/` (`editor_state.*`, `editor_state_selection.cpp`,
+- `src/gui/state/` (`editor_state.*`, `editor_state_commands.cpp`, `editor_state_selection.cpp`,
   `editor_state_clipboard.cpp`, `editor_state_grouping.cpp`,
   `editor_state_snapshot.cpp`, `layer_tree_model.*`, `scene_view.h`)
   - Project ownership, index cache, lock/visibility/mask propagation, and
-    shared Qt signals in the core file; selection, clipboard/duplicate/insert,
+    shared Qt signals in the core file; the command dispatcher owns validation,
+    transactions, property propagation, and reparenting. Properties controls,
+    Layers edits and selection, and Edit actions submit state commands.
+    `tools/gui_command_test.cpp` exercises the production widgets through Qt
+    events and checks command delivery, history, tree integrity, world transforms,
+    and export round trips. Selection, clipboard/duplicate/insert,
     group/ungroup/reorder, and undo/redo snapshots in the per-concern units;
     the layer/group/guide tree model; and shared scene transform/local-rect
     helpers plus the bounds accumulator.
@@ -1170,7 +1183,7 @@ The codebase is designed to build on both Windows (via vcpkg) and Linux (via sys
     material defaults and native textures are held in bounded process-wide caches.
   - Dockable panels and their support: property editing (single/multi/group/
     guide, live color, numeric-label dragging, mixed values); the tree view with
-    sibling-only drag/drop reordering, row badges, and thumbnails; the
+    drag/drop reordering and reparenting, row badges, and thumbnails; the
     project-specific swatches panel; the shape browser with theme-aware previews,
     categories, favorites, and insertion;
     vector geometry loading and human-readable shape names

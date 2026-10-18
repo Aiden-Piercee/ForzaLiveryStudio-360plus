@@ -61,6 +61,42 @@ struct ProjectClipboard {
     std::vector<std::unique_ptr<fls::scene::Layer>> nodes;
 };
 
+enum class EditorCommandType {
+    Action,
+    Property,
+    LocalTransforms,
+    WorldTransform,
+    MoveEntries,
+    Selection,
+    Copy,
+    Cut,
+    Paste,
+    Duplicate,
+    Remove,
+    Group,
+    Ungroup,
+    Undo,
+    Redo,
+    Insert,
+};
+
+struct EditorCommand {
+    EditorCommandType type = EditorCommandType::Property;
+    QVector<QString> entries;
+    QString property;
+    QVariant value;
+    QHash<QString, double> values;
+    QHash<QString, fls::scene::Transform2D> transforms;
+    QTransform worldTransform;
+    QString parentId;
+    int row = -1;
+    bool relative = false;
+    bool flatten = false;
+    bool deferRefresh = false;
+    std::optional<ProjectClipboard> clipboard;
+    std::optional<fls::scene::ContourData> contourData;
+};
+
 class EditorState final : public QObject {
     Q_OBJECT
 
@@ -74,6 +110,11 @@ public:
 
     bool isModified() const;
     void setModified(bool modified);
+    bool executeCommand(const EditorCommand &command, QString *error = nullptr);
+    QVector<QString> selectionEntries() const;
+    QVector<QString> propertyTargets(const QVector<QString> &entries, const QString &property) const;
+    Qt::CheckState propertyCheckState(const QVector<QString> &entries, const QString &property) const;
+    bool canMoveEntries(const QVector<QString> &entries, const QString &parentId, QString *error = nullptr) const;
 
     QVector<fls::scene::Shape *> selectedLayers();
     QVector<fls::scene::ContourFigure *> selectedContours();
@@ -177,7 +218,7 @@ public:
                            const QString &parentId, int insertAt, bool haveTarget,
                            QSet<QString> *newLayerSelection, QSet<QString> *newGuideLayerSelection,
                            bool renameCopies, QVector<QString> *newRootEntryIds);
-    void pruneEmptyGroups();
+    QHash<QString, QString> pruneRedundantGroups();
 
     fls::Project project_;
     bool hasProject_ = false;
@@ -192,6 +233,9 @@ public:
     std::optional<ProjectClipboard> clipboard_;
 
 Q_SIGNALS:
+    void editActionRequested(const QString &action);
+    void commandExecuted(gui::EditorCommandType type, const QVector<QString> &entries);
+    void commandRejected(gui::EditorCommandType type, const QString &reason);
     void projectReset();
     void projectGeometryChanged(bool refreshPreviews, const QVector<QString> &changedNodeIds);
     void transformLiveChanged(const QVector<QString> &targetIds);
@@ -240,6 +284,8 @@ private:
     void updateRenderCacheTransforms(const QVector<QString> &targetIds) const;
     QVector<QString> existingEntryIds(const QVector<QString> &entryIds) const;
     QString nextGroupForLayerSelection(const QString &layerId) const;
+    bool applyPropertyCommand(const EditorCommand &command, QString *error);
+    bool moveEntries(const QVector<QString> &entries, const QString &parentId, int row);
     QVector<QString> leafLayerIdsForEntryCached(const QString &entryId, const ProjectIndexCache &cache) const;
     bool entryHasLockedLayerCached(const QString &entryId, const ProjectIndexCache &cache) const;
 
@@ -267,3 +313,5 @@ private:
 };
 
 } // namespace gui
+
+Q_DECLARE_METATYPE(gui::EditorCommandType)

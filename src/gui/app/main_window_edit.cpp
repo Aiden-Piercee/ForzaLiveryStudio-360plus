@@ -880,30 +880,13 @@ void MainWindow::refreshPropertyBoxFieldsFromCanvas() {
 }
 
 void MainWindow::deleteSelectedLayers() {
-    if (!state_->hasProject() || (state_->selectedLayerIds().isEmpty() && state_->selectedGuideLayerIds().isEmpty())) {
-        return;
+    EditorCommand command;
+    command.type = EditorCommandType::Remove;
+    command.entries = state_->selectionEntries();
+    QString error;
+    if (!state_->executeCommand(command, &error)) {
+        statusBar()->showMessage(error, 3000);
     }
-    const QSet<QString> lockedIds = state_->lockedLayerIds();
-    for (const QString &layerId : state_->selectedLayerIds()) {
-        if (lockedIds.contains(layerId)) {
-            statusBar()->showMessage(QStringLiteral("Selection contains locked layers"), 3000);
-            return;
-        }
-    }
-    for (fls::scene::GuideLayer *guide : state_->selectedGuideLayers()) {
-        if (guide->locked) {
-            statusBar()->showMessage(QStringLiteral("Selection contains locked layers"), 3000);
-            return;
-        }
-    }
-
-    state_->beginProjectEdit();
-    state_->removeEntries(selectedEntryIds());
-    state_->pruneEmptyGroups();
-    state_->selectedLayerIds_.clear();
-    state_->selectedGuideLayerIds_.clear();
-    state_->commitProjectEdit();
-    state_->noteProjectStructureChanged();
 }
 
 void MainWindow::copySelection() {
@@ -913,26 +896,13 @@ void MainWindow::copySelection() {
 }
 
 void MainWindow::cutSelection() {
-    if (!state_->hasProject()) {
-        return;
+    EditorCommand command;
+    command.type = EditorCommandType::Cut;
+    command.entries = state_->selectionEntries();
+    QString error;
+    if (!state_->executeCommand(command, &error)) {
+        statusBar()->showMessage(error, 3000);
     }
-    const QVector<QString> entries = state_->normalizeEntrySelection(selectedEntryIds());
-    if (entries.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("No selection to cut"), 2500);
-        return;
-    }
-    if (!state_->copyEntriesToClipboard(entries)) {
-        statusBar()->showMessage(QStringLiteral("Selection contains locked layers"), 3000);
-        return;
-    }
-
-    state_->beginProjectEdit();
-    state_->removeEntries(entries);
-    state_->selectedLayerIds_.clear();
-    state_->selectedGuideLayerIds_.clear();
-    state_->commitProjectEdit();
-    state_->noteProjectStructureChanged();
-    statusBar()->showMessage(QStringLiteral("Cut selection"), 1500);
 }
 
 void MainWindow::pasteClipboard() {
@@ -956,27 +926,27 @@ void MainWindow::pasteClipboard() {
     const QPointF pasteCenter = canvas_ == nullptr || pasteInPlace
         ? QPointF() : canvas_->viewCenterWorld();
     state_->beginProjectEdit();
-    QSet<QString> newLayerSelection;
-    QSet<QString> newGuideSelection;
-    QVector<QString> insertedRootIds;
-    state_->insertClipboardAboveSelection(
-        pasteBuffer, selectedEntryIds(), &newLayerSelection, &newGuideSelection, true, &insertedRootIds);
-    state_->selectedLayerIds_ = newLayerSelection;
-    state_->selectedGuideLayerIds_ = newGuideSelection;
-    state_->selectedEntryIds_.clear();
-    if (canvas_ != nullptr) {
+    EditorCommand command;
+    command.type = EditorCommandType::Paste;
+    command.entries = state_->selectionEntries();
+    command.clipboard = pasteBuffer;
+    if (!state_->executeCommand(command)) {
+        state_->cancelProjectEdit();
+        return;
+    }
+    if (canvas_ != nullptr && !pasteInPlace) {
         canvas_->invalidateSelectionCache();
-        if (!pasteInPlace) {
-            const QRectF pastedBounds = canvas_->selectionWorldBounds();
-            if (pastedBounds.isValid() && !pastedBounds.isEmpty()) {
-                const QPointF delta = pasteCenter - pastedBounds.center();
-                state_->transformEntryFrames(
-                    insertedRootIds, QTransform::fromTranslate(delta.x(), delta.y()));
-            }
+        const QRectF pastedBounds = canvas_->selectionWorldBounds();
+        if (pastedBounds.isValid() && !pastedBounds.isEmpty()) {
+            const QPointF delta = pasteCenter - pastedBounds.center();
+            EditorCommand transform;
+            transform.type = EditorCommandType::WorldTransform;
+            transform.entries = state_->selectionEntries();
+            transform.worldTransform = QTransform::fromTranslate(delta.x(), delta.y());
+            state_->executeCommand(transform);
         }
     }
     state_->commitProjectEdit();
-    state_->noteProjectStructureChanged();
     if (strippedLogos > 0) {
         statusBar()->showMessage(
             QStringLiteral("Pasted selection (%1 logo%2 removed — not allowed in Group projects)")
@@ -989,23 +959,13 @@ void MainWindow::pasteClipboard() {
 }
 
 void MainWindow::stampSelection() {
-    if (!state_->hasProject()) {
-        return;
+    EditorCommand command;
+    command.type = EditorCommandType::Duplicate;
+    command.entries = state_->selectionEntries();
+    QString error;
+    if (!state_->executeCommand(command, &error)) {
+        statusBar()->showMessage(error, 3000);
     }
-    const QVector<QString> entries = state_->normalizeEntrySelection(selectedEntryIds());
-    if (entries.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("No selection to stamp"), 2500);
-        return;
-    }
-    state_->beginProjectEdit();
-    const bool stamped = state_->duplicateEntriesInPlace(entries);
-    state_->commitProjectEdit();
-    if (!stamped) {
-        statusBar()->showMessage(QStringLiteral("Selection contains locked layers"), 3000);
-        return;
-    }
-    state_->noteProjectStructureChanged();
-    statusBar()->showMessage(QStringLiteral("Stamped selection"), 1500);
 }
 
 void MainWindow::sampleGuideColorToSelection() {
@@ -1420,103 +1380,25 @@ bool MainWindow::importGuideLayer(const QString &path, QString *error) {
 }
 
 void MainWindow::groupOrUngroupSelection() {
-    if (!state_->hasProject()) {
-        return;
+    EditorCommand command;
+    command.entries = state_->selectionEntries();
+    command.type = command.entries.size() == 1 && state_->entryIsGroup(command.entries.front())
+        ? EditorCommandType::Ungroup : EditorCommandType::Group;
+    QString error;
+    if (!state_->executeCommand(command, &error)) {
+        statusBar()->showMessage(error, 3000);
     }
-    const QVector<QString> entries = state_->normalizeEntrySelection(selectedEntryIds());
-    if (entries.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("No selection to group"), 2500);
-        return;
-    }
-
-    for (const QString &entryId : entries) {
-        if (state_->entryHasLockedLayer(entryId)) {
-            statusBar()->showMessage(QStringLiteral("Selection contains locked layers"), 3000);
-            return;
-        }
-    }
-    if (entries.size() == 1 && state_->entryIsGroup(entries.front())) {
-        state_->beginProjectEdit();
-        state_->ungroupEntries(entries, false);
-        state_->commitProjectEdit();
-        state_->noteProjectStructureChanged();
-        statusBar()->showMessage(QStringLiteral("Ungrouped selection"), 1500);
-        return;
-    }
-
-    for (const QString &entryId : entries) {
-        if (state_->entryIsGuide(entryId)) {
-            statusBar()->showMessage(QStringLiteral("Guide layers cannot be grouped"), 3000);
-            return;
-        }
-    }
-    if (entries.size() < 2) {
-        statusBar()->showMessage(QStringLiteral("Select at least two layers to group"), 3000);
-        return;
-    }
-    const QString parentId = state_->parentGroupForEntry(entries.front());
-    const fls::scene::Group *parentGroup = state_->groupForId(parentId);
-    if (parentGroup == nullptr) {
-        statusBar()->showMessage(QStringLiteral("Selection cannot be grouped"), 3000);
-        return;
-    }
-    QVector<int> orders;
-    orders.reserve(entries.size());
-    for (const QString &entryId : entries) {
-        if (state_->parentGroupForEntry(entryId) != parentId) {
-            statusBar()->showMessage(QStringLiteral("Only direct sibling layers can be grouped"), 3000);
-            return;
-        }
-        int order = -1;
-        for (int i = 0; i < static_cast<int>(parentGroup->children.size()); ++i) {
-            if (parentGroup->children[i]->id == entryId) {
-                order = i;
-                break;
-            }
-        }
-        if (order < 0) {
-            statusBar()->showMessage(QStringLiteral("Selection cannot be grouped"), 3000);
-            return;
-        }
-        orders.push_back(order);
-    }
-    std::sort(orders.begin(), orders.end());
-    for (int i = 1; i < orders.size(); ++i) {
-        if (orders[i] != orders[i - 1] + 1) {
-            statusBar()->showMessage(QStringLiteral("Select adjacent sibling layers to group"), 3000);
-            return;
-        }
-    }
-
-    state_->beginProjectEdit();
-    state_->groupEntries(entries);
-    state_->commitProjectEdit();
-    state_->noteProjectStructureChanged();
-    statusBar()->showMessage(QStringLiteral("Grouped selection"), 1500);
 }
 
 void MainWindow::ungroupSelectionFlat() {
-    if (!state_->hasProject()) {
-        return;
+    EditorCommand command;
+    command.type = EditorCommandType::Ungroup;
+    command.entries = state_->selectionEntries();
+    command.flatten = true;
+    QString error;
+    if (!state_->executeCommand(command, &error)) {
+        statusBar()->showMessage(error, 3000);
     }
-    const QVector<QString> entries = state_->normalizeEntrySelection(selectedEntryIds());
-    if (entries.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("No selection to ungroup"), 2500);
-        return;
-    }
-
-    for (const QString &entryId : entries) {
-        if (state_->entryHasLockedLayer(entryId)) {
-            statusBar()->showMessage(QStringLiteral("Selection contains locked layers"), 3000);
-            return;
-        }
-    }
-
-    state_->beginProjectEdit();
-    state_->ungroupEntries(entries, true);
-    state_->commitProjectEdit();
-    state_->noteProjectStructureChanged();
-    statusBar()->showMessage(QStringLiteral("Flat ungrouped selection"), 1500);
 }
 
 void MainWindow::collapseAllGroups() {
@@ -1532,7 +1414,9 @@ void MainWindow::undo() {
     if (canvas_ != nullptr && canvas_->undoContourEdit()) {
         return;
     }
-    state_->undo();
+    EditorCommand command;
+    command.type = EditorCommandType::Undo;
+    state_->executeCommand(command);
     canvas_->resetRelativeSelectionFrame();
 }
 
@@ -1540,7 +1424,9 @@ void MainWindow::redo() {
     if (canvas_ != nullptr && canvas_->redoContourEdit()) {
         return;
     }
-    state_->redo();
+    EditorCommand command;
+    command.type = EditorCommandType::Redo;
+    state_->executeCommand(command);
     canvas_->resetRelativeSelectionFrame();
 }
 
@@ -1574,10 +1460,12 @@ void MainWindow::noteProjectGeometryChanged(bool refreshPreviews) {
         canvas_->invalidateContourLeewayCache();
         canvas_->update();
     }
-    if (updateLayerPreviews && treeModel_ != nullptr) {
+    if (treeModel_ != nullptr) {
         ScopedPerf perfPrev("  refreshPreviews");
         treeModel_->refreshStateRoles(&state_->project_);
-        treeModel_->refreshPreviews(&state_->project_);
+        if (updateLayerPreviews) {
+            treeModel_->refreshPreviews(&state_->project_);
+        }
     }
     updateColorPaletteWidget();
     refreshSelectionProperties();
@@ -1586,6 +1474,7 @@ void MainWindow::noteProjectGeometryChanged(bool refreshPreviews) {
 
 void MainWindow::noteProjectStructureChanged() {
     ScopedPerf perf("noteProjectStructureChanged");
+    const QSignalBlocker selectionBlocker(tree_->selectionModel());
     state_->selectedLayerIds_ = state_->existingLayerIds(state_->selectedLayerIds_);
     state_->selectedGuideLayerIds_ = state_->existingGuideLayerIds(state_->selectedGuideLayerIds_);
     autoExpandedTreeIndexes_.clear();

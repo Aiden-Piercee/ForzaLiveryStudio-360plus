@@ -289,6 +289,9 @@ void MainWindow::setupDocks() {
 }
 
 void MainWindow::connectEditorStateSignals() {
+    connect(state_, &EditorState::commandRejected, this, [this](EditorCommandType, const QString &reason) {
+        statusBar()->showMessage(reason, 3000);
+    });
     connect(state_, &EditorState::selectionChanged, this, [this]() {
         updateLastSelectedShapeDefaults();
         syncTreeSelectionFromIds();
@@ -379,6 +382,21 @@ void MainWindow::setupFileMenu() {
                  QStringLiteral("exit"), QStringLiteral("Exit"), &QWidget::close);
 }
 
+void MainWindow::bindEditorAction(QAction *action, const QString &id, std::function<void()> handler) {
+    action->setProperty("editorCommandAction", id);
+    connect(action, &QAction::triggered, this, [this, id]() {
+        EditorCommand command;
+        command.type = EditorCommandType::Action;
+        command.property = id;
+        state_->executeCommand(command);
+    });
+    connect(state_, &EditorState::editActionRequested, this, [id, handler](const QString &requested) {
+        if (requested == id) {
+            handler();
+        }
+    });
+}
+
 void MainWindow::setupEditMenu() {
     auto *editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
     auto addEditEntry = [this, editMenu](const QString &text, const QString &id, const QString &label,
@@ -386,7 +404,7 @@ void MainWindow::setupEditMenu() {
         QAction *action = editMenu->addAction(mirroredIcon ? mirroredAssetIcon(iconName) : assetIcon(iconName), text);
         registerShortcutAction(action, id, label, iconName, mirroredIcon);
         addAction(action);
-        connect(action, &QAction::triggered, this, slot);
+        bindEditorAction(action, id, [this, slot]() { (this->*slot)(); });
         return action;
     };
 
@@ -415,7 +433,7 @@ void MainWindow::setupEditMenu() {
     QAction *flipSelection = editMenu->addAction(QStringLiteral("Flip Selection"));
     registerShortcutAction(flipSelection, QStringLiteral("flip_selection"), QStringLiteral("Flip Selection"));
     addAction(flipSelection);
-    connect(flipSelection, &QAction::triggered, this, [this]() {
+    bindEditorAction(flipSelection, QStringLiteral("flip_selection"), [this]() {
         if (canvas_ != nullptr) {
             canvas_->cycleFlipSelection();
         }
@@ -430,7 +448,7 @@ void MainWindow::setupEditMenu() {
     auto *saveContour = editMenu->addAction(QStringLiteral("Save Pen or Lining Path as Figure"));
     registerShortcutAction(saveContour, QStringLiteral("save_pen_figure"), QStringLiteral("Save Pen or Lining Path as Figure"));
     addAction(saveContour);
-    connect(saveContour, &QAction::triggered, this, [this]() {
+    bindEditorAction(saveContour, QStringLiteral("save_pen_figure"), [this]() {
         if (canvas_->savePathFigure()) {
             statusBar()->showMessage(QStringLiteral("Contour figure saved in Layers"), 2500);
         } else {
@@ -440,7 +458,7 @@ void MainWindow::setupEditMenu() {
     auto *newContour = editMenu->addAction(QStringLiteral("New Pen Contour"));
     registerShortcutAction(newContour, QStringLiteral("new_pen_contour"), QStringLiteral("New Pen Contour"));
     addAction(newContour);
-    connect(newContour, &QAction::triggered, canvas_, &ProjectCanvas::startNewPenContour);
+    bindEditorAction(newContour, QStringLiteral("new_pen_contour"), [this]() { canvas_->startNewPenContour(); });
 
     editMenu->addSeparator();
     auto *alignMenu = editMenu->addMenu(QStringLiteral("&Align"));
@@ -448,7 +466,7 @@ void MainWindow::setupEditMenu() {
         QAction *action = alignMenu->addAction(text);
         registerShortcutAction(action, id, text);
         addAction(action);
-        connect(action, &QAction::triggered, this, [this, edge]() { alignSelection(edge); });
+        bindEditorAction(action, id, [this, edge]() { alignSelection(edge); });
         return action;
     };
     addAlignEntry(QStringLiteral("Align &Top"), QStringLiteral("align_top"), ProjectCanvas::AlignEdge::Top);
@@ -464,7 +482,7 @@ void MainWindow::setupEditMenu() {
         QAction *action = distributeMenu->addAction(text);
         registerShortcutAction(action, id, text);
         addAction(action);
-        connect(action, &QAction::triggered, this, [this, axis]() { distributeSelection(axis); });
+        bindEditorAction(action, id, [this, axis]() { distributeSelection(axis); });
         return action;
     };
     addDistributeEntry(QStringLiteral("Distribute &Vertical"), QStringLiteral("distribute_vertical"),
@@ -851,6 +869,7 @@ QAction *MainWindow::registerShortcutAction(QAction *action,
     if (action == nullptr) {
         return nullptr;
     }
+    action->setObjectName(id);
     if (!iconName.isEmpty()) {
         trackIconAction(action, iconName, mirroredIcon);
     }

@@ -26,6 +26,7 @@ Q_SIGNALS:
 protected:
     void paintEvent(QPaintEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dragMoveEvent(QDragMoveEvent *event) override;
@@ -42,6 +43,7 @@ private:
     void stopDragAutoScroll();
     bool dropTargetForPosition(const QPoint &position, QModelIndex *dropParent, int *dropRow, int *indicatorY) const;
 
+    QPersistentModelIndex pressedBadgeIndex_;
     int dropIndicatorY_ = -1;
     int dragScrollDirection_ = 0;
     QPoint lastDragPosition_;

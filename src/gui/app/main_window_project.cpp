@@ -400,23 +400,13 @@ void MainWindow::updateSelectionFromTree() {
     if (syncingSelection_) {
         return;
     }
-    QSet<QString> ids;
-    QSet<QString> guideIds;
-    QVector<QString> entryIds;
+    EditorCommand command;
+    command.type = EditorCommandType::Selection;
     for (const QModelIndex &index : tree_->selectionModel()->selectedRows()) {
-        const QString entryId = index.data(LayerTreeModel::EntryIdRole).toString();
-        if (!entryId.isEmpty()) {
-            entryIds.push_back(entryId);
-        }
-        for (const QString &id : idsForIndex(index)) {
-            ids.insert(id);
-        }
-        for (const QString &id : index.data(LayerTreeModel::GuideIdsRole).toStringList()) {
-            guideIds.insert(id);
-        }
+        command.entries.push_back(index.data(LayerTreeModel::EntryIdRole).toString());
     }
     suppressTreeReveal_ = true;
-    state_->setSelectionFromEntries(ids, guideIds, entryIds);
+    state_->executeCommand(command);
     suppressTreeReveal_ = false;
     if (canvas_ != nullptr) {
         canvas_->setFocus();
@@ -559,18 +549,15 @@ QVector<QString> MainWindow::selectedEntryIds() const {
 }
 
 bool MainWindow::copySelectionToClipboard() {
-    if (!state_->hasProject()) {
+    EditorCommand command;
+    command.type = EditorCommandType::Copy;
+    command.entries = state_->selectionEntries();
+    QString error;
+    if (!state_->executeCommand(command, &error)) {
+        statusBar()->showMessage(error, 3000);
         return false;
     }
-    const QVector<QString> entries = state_->normalizeEntrySelection(selectedEntryIds());
-    if (entries.isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("No selection to copy"), 2500);
-        return false;
-    }
-    if (!state_->copyEntriesToClipboard(entries)) {
-        statusBar()->showMessage(QStringLiteral("Selection contains locked layers"), 3000);
-        return false;
-    }
+
     return true;
 }
 

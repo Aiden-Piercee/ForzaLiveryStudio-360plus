@@ -946,7 +946,10 @@ bool ProjectCanvas::savePathFigure(bool selectFigure) {
     commitPathEdit(path);
     if (isSavedFigurePath(path)) {
         if (selectFigure) {
-            state_->setSelectionFromEntries({pathFigureId_}, {}, {pathFigureId_});
+            EditorCommand selection;
+            selection.type = EditorCommandType::Selection;
+            selection.entries = {pathFigureId_};
+            state_->executeCommand(selection);
         }
         return true;
     }
@@ -961,7 +964,17 @@ bool ProjectCanvas::savePathFigure(bool selectFigure) {
     releaseSavedFigure();
     syncingPathFigure_ = true;
     state_->beginProjectEdit();
-    state_->insertLayerAboveSelection(std::move(figure), state_->selectedTransformTargetIds());
+    const QVector<QString> previousSelection = state_->selectionEntries();
+    EditorCommand insert;
+    insert.type = EditorCommandType::Insert;
+    insert.entries = previousSelection;
+    insert.clipboard.emplace();
+    insert.clipboard->nodes.push_back(std::move(figure));
+    if (!state_->executeCommand(insert)) {
+        state_->cancelProjectEdit();
+        syncingPathFigure_ = false;
+        return false;
+    }
     auto *inserted = static_cast<fls::scene::ContourFigure *>(state_->sceneNode(id));
     bool invertible = false;
     const QTransform inverse = sceneWorldTransform(*inserted).inverted(&invertible);
@@ -971,15 +984,20 @@ bool ProjectCanvas::savePathFigure(bool selectFigure) {
         syncingPathFigure_ = false;
         return false;
     }
-    inserted->data = transformedPathState(std::move(inserted->data), inverse);
+    EditorCommand data;
+    data.entries = {id};
+    data.property = QStringLiteral("contourData");
+    data.contourData = transformedPathState(inserted->data, inverse);
+    state_->executeCommand(data);
     pathFigureId_ = id;
     pathFigureKind_ = path.pathKind;
     (path.pathKind == fls::scene::ContourPathKind::Lining ? liningDraft_ : penDraft_).reset();
     path.undoStack.clear();
     path.redoStack.clear();
-    if (selectFigure) {
-        state_->setSelectionFromEntries({id}, {}, {id});
-    }
+    EditorCommand selection;
+    selection.type = EditorCommandType::Selection;
+    selection.entries = selectFigure ? QVector<QString>{id} : previousSelection;
+    state_->executeCommand(selection);
     state_->commitProjectEdit();
     state_->noteProjectStructureChanged();
     syncingPathFigure_ = false;
@@ -992,7 +1010,9 @@ void ProjectCanvas::startNewPenContour() {
     commitPathEdit(pen_);
     cancelPenInteraction();
     if (state_ != nullptr) {
-        state_->clearSelection();
+        EditorCommand selection;
+        selection.type = EditorCommandType::Selection;
+        state_->executeCommand(selection);
     }
     setTool(QStringLiteral("pen"));
 }
@@ -1086,10 +1106,11 @@ void ProjectCanvas::storePathFigure() {
     }
     data = transformedPathState(std::move(data), inverse);
     syncingPathFigure_ = true;
-    state_->beginProjectEdit();
-    figure->data = std::move(data);
-    state_->commitProjectEdit();
-    state_->noteProjectGeometryChanged(true, {pathFigureId_});
+    EditorCommand command;
+    command.entries = {pathFigureId_};
+    command.property = QStringLiteral("contourData");
+    command.contourData = std::move(data);
+    state_->executeCommand(command);
     syncingPathFigure_ = false;
 }
 

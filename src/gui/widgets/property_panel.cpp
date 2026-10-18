@@ -269,6 +269,10 @@ public:
     using QCheckBox::QCheckBox;
 
 protected:
+    void nextCheckState() override {
+        setCheckState(checkState() == Qt::Checked ? Qt::Unchecked : Qt::Checked);
+    }
+
     void paintEvent(QPaintEvent *event) override {
         QCheckBox::paintEvent(event);
         if (checkState() != Qt::PartiallyChecked) {
@@ -385,18 +389,6 @@ AffineDecomposition decomposeAffine(const QTransform &result, double fallbackSke
     return out;
 }
 
-void applyDecomposedTransform(fls::scene::Shape *layer, const QTransform &result) {
-    const AffineDecomposition dec = decomposeAffine(result, layer->skew);
-    if (!dec.ok) {
-        return;
-    }
-    layer->x = dec.x;
-    layer->y = dec.y;
-    layer->rotation = dec.rotation;
-    layer->scaleX = dec.scaleX;
-    layer->scaleY = dec.scaleY;
-    layer->skew = dec.skew;
-}
 
 struct TransformAverage {
     int count = 0;
@@ -772,6 +764,7 @@ PropertyPanel::PropertyPanel(EditorState *state, QWidget *parent)
 
     for (auto it = widgetProperties_.begin(); it != widgetProperties_.end(); ++it) {
         QWidget *widget = it.key();
+        widget->setObjectName(QStringLiteral("property.%1").arg(it.value()));
         if (qobject_cast<QAbstractSpinBox *>(widget) != nullptr) {
             widget->installEventFilter(this);
         }
@@ -785,15 +778,19 @@ PropertyPanel::PropertyPanel(EditorState *state, QWidget *parent)
             connect(line, &QLineEdit::editingFinished, this, [this, line]() { applyChanged(line); });
         }
     }
+    colorButton_->setObjectName(QStringLiteral("property.color"));
     connect(colorButton_, &QPushButton::clicked, this, [this]() { pickColor(); });
 
     const auto dragLabel = [this](const QString &text, const QString &iconName, const QString &property, QDoubleSpinBox *box) {
-        return propertyLabel(this,
+        auto *label = propertyLabel(this,
                              text,
                              iconName,
                              [this, property, box](const QPoint &pos) { return beginValueLabelDrag(property, box, pos); },
                              [this](const QPoint &pos) { updateValueLabelDrag(pos); },
                              [this](bool commit) { endValueLabelDrag(commit); });
+        label->setObjectName(QStringLiteral("property.label.") + property);
+
+        return label;
     };
 
     layout->addRow(propertyLabel(this, QStringLiteral("Name"), QStringLiteral("PropertyName.xpm")), name_);
@@ -903,6 +900,12 @@ void PropertyPanel::setSelection(const QVector<fls::scene::Shape *> &layers,
     guides_ = guides;
     groups_ = groups;
     contours_ = contours;
+    selectionEntryIds_.clear();
+    for (const auto *node : layers_) selectionEntryIds_.push_back(node->id);
+    for (const auto *node : guides_) selectionEntryIds_.push_back(node->id);
+    for (const auto *node : contours_) selectionEntryIds_.push_back(node->id);
+    for (const auto *node : groups_) selectionEntryIds_.push_back(node->id);
+    selectionEntryIds_ = state_->normalizeEntrySelection(selectionEntryIds_);
     baselines_.clear();
     setEnabled(!layers_.isEmpty() || !guides_.isEmpty() || !groups_.isEmpty() || !contours_.isEmpty());
     if (!isBoxSelection()) {
@@ -939,9 +942,18 @@ void PropertyPanel::setSelection(const QVector<fls::scene::Shape *> &layers,
         loading_ = false;
         return;
     }
-    if (!guides_.isEmpty()) {
+    if (!guides_.isEmpty() && groups_.isEmpty()) {
         for (QWidget *widget : layerPropertyWidgets(name_, shapeId_, x_, y_, scaleX_, scaleY_, rotation_, skew_, opacity_, visible_, locked_, mask_, colorButton_)) {
             widget->setEnabled(false);
+        }
+        for (auto [box, property] : {std::pair{visible_, QStringLiteral("visible")},
+                                    std::pair{locked_, QStringLiteral("locked")},
+                                    std::pair{mask_, QStringLiteral("mask")}}) {
+            const QSignalBlocker blocker(box);
+            const auto check = state_->propertyCheckState(selectionEntryIds_, property);
+            box->setEnabled(!state_->propertyTargets(selectionEntryIds_, property).isEmpty());
+            box->setTristate(check == Qt::PartiallyChecked);
+            box->setCheckState(check);
         }
         debug_->setText(QStringLiteral("Mixed guide and vinyl selection"));
         loading_ = false;
@@ -967,52 +979,16 @@ void PropertyPanel::setSelection(const QVector<fls::scene::Shape *> &layers,
         visible_->setEnabled(true);
         locked_->setEnabled(true);
         mask_->setEnabled(true);
-        auto leafTriState = [this](const fls::scene::Group &group, auto layerPred) {
-            const QVector<QString> ids = state_->leafLayerIdsForEntry(group.id);
-            if (ids.isEmpty()) {
-                return Qt::Unchecked;
-            }
-            bool anyTrue = false;
-            bool anyFalse = false;
-            for (const QString &id : ids) {
-                const auto *layer = dynamic_cast<const fls::scene::Shape *>(state_->sceneNode(id));
-                if (layer == nullptr) {
-                    continue;
-                }
-                if (layerPred(*layer)) {
-                    anyTrue = true;
-                } else {
-                    anyFalse = true;
-                }
-            }
-            if (anyTrue && anyFalse) {
-                return Qt::PartiallyChecked;
-            }
-            return anyTrue ? Qt::Checked : Qt::Unchecked;
-        };
-        auto setGroupCheck = [this](QCheckBox *box, auto getter) {
-            Qt::CheckState combined = getter(*groups_.front());
-            for (fls::scene::Group *group : groups_) {
-                if (getter(*group) != combined) {
-                    combined = Qt::PartiallyChecked;
-                    break;
-                }
-            }
-            box->setTristate(combined == Qt::PartiallyChecked);
-            box->setCheckState(combined);
-        };
-        setGroupCheck(visible_, [&](const fls::scene::Group &group) {
-            return leafTriState(group, [](const fls::scene::Shape &layer) { return layer.visible; });
-        });
-        setGroupCheck(mask_, [&](const fls::scene::Group &group) {
-            return leafTriState(group, [](const fls::scene::Shape &layer) { return layer.mask; });
-        });
-        setGroupCheck(locked_, [&](const fls::scene::Group &group) {
-            return leafTriState(group, [this](const fls::scene::Shape &layer) { return state_->isLayerLocked(layer.id); });
-        });
-        const QString firstName = groups_.front()->name;
-        const bool sameName = std::all_of(groups_.begin(), groups_.end(), [&](const fls::scene::Group *group) {
-            return group->name == firstName;
+        for (auto [box, property] : {std::pair{visible_, QStringLiteral("visible")},
+                                    std::pair{locked_, QStringLiteral("locked")},
+                                    std::pair{mask_, QStringLiteral("mask")}}) {
+            const auto check = state_->propertyCheckState(selectionEntryIds_, property);
+            box->setTristate(check == Qt::PartiallyChecked);
+            box->setCheckState(check);
+        }
+        const QString firstName = state_->sceneNode(selectionEntryIds_.front())->name;
+        const bool sameName = std::all_of(selectionEntryIds_.begin(), selectionEntryIds_.end(), [&](const QString &id) {
+            return state_->sceneNode(id)->name == firstName;
         });
         name_->setText(sameName ? firstName : QString());
         name_->setStyleSheet(sameName ? QString() : mixedValueStyle());
@@ -1351,28 +1327,6 @@ void PropertyPanel::setBoxProxyFields(bool neutralTransformValues) {
     setProxy(skew_, skewValue);
 }
 
-void PropertyPanel::applyBoxTransform(const QString &property, double fromValue, double toValue) {
-    const QTransform transform = boxAffine(property, fromValue, toValue, selectionBoxCenter());
-    if (transform.isIdentity()) {
-        return;
-    }
-    const QSet<QString> groupedLayerIds = coveredLayerIdsForGroups(state_, groups_);
-    for (fls::scene::Shape *layer : layers_) {
-        if (groupedLayerIds.contains(layer->id)) {
-            continue;
-        }
-        applyDecomposedTransform(layer, localResultForWorldTransform(*layer, flatEntryTransform(*layer), transform));
-    }
-    if (state_ != nullptr && !groups_.isEmpty()) {
-        QVector<QString> groupIds;
-        groupIds.reserve(groups_.size());
-        for (const fls::scene::Group *group : groups_) {
-            groupIds.push_back(group->id);
-        }
-        state_->transformGroupFrames(groupIds, transform);
-    }
-}
-
 void PropertyPanel::clearMixedStyles() {
     name_->setStyleSheet(QString());
     shapeId_->setStyleSheet(QString());
@@ -1382,183 +1336,59 @@ void PropertyPanel::clearMixedStyles() {
 }
 
 void PropertyPanel::applyChanged(QWidget *sender) {
-    if (loading_ || (layers_.isEmpty() && guides_.isEmpty() && groups_.isEmpty())) {
+    if (loading_ || selectionEntryIds_.isEmpty()) {
         return;
     }
-    const QString property = widgetProperties_.value(sender);
-    if (property.isEmpty()) {
+    EditorCommand command;
+    command.entries = selectionEntryIds_;
+    command.property = widgetProperties_.value(sender);
+    if (command.property.isEmpty()) {
         return;
     }
-    if (!guides_.isEmpty() && (sender != locked_)) {
-        for (const fls::scene::GuideLayer *guide : guides_) {
-            if (guide->locked) {
-                setSelection(layers_, guides_, groups_, contours_);
-                return;
-            }
-        }
-    }
-    if (groups_.isEmpty() && guides_.isEmpty() && sender != locked_) {
-        const QSet<QString> lockedIds = state_->lockedLayerIds();
-        for (const fls::scene::Shape *layer : layers_) {
-            if (lockedIds.contains(layer->id)) {
-                setSelection(layers_, guides_, groups_, contours_);
-                return;
-            }
-        }
-    }
-    QSet<QString> refreshLayerIds;
-    QSet<QString> refreshGuideIds;
-    QVector<QString> refreshGroupIds;
-    refreshLayerIds.reserve(layers_.size());
-    refreshGuideIds.reserve(guides_.size());
-    refreshGroupIds.reserve(groups_.size());
-    for (const fls::scene::Shape *layer : layers_) {
-        refreshLayerIds.insert(layer->id);
-    }
-    for (const fls::scene::GuideLayer *guide : guides_) {
-        refreshGuideIds.insert(guide->id);
-    }
-    for (const fls::scene::Group *group : groups_) {
-        refreshGroupIds.push_back(group->id);
-    }
+    const auto layerIds = state_->selectedLayerIds();
+    const auto guideIds = state_->selectedGuideLayerIds();
+    const auto groupIds = state_->fullySelectedTopGroupIds();
     applyingChange_ = true;
-    const bool transformOnly = isTransformProperty(property);
-    if (transformOnly) {
-        state_->beginTransformCommand(transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
-    } else {
-        state_->beginProjectEdit();
-        detachSelectionForEdit();
-    }
-    if (!guides_.isEmpty() && layers_.isEmpty() && groups_.isEmpty()) {
-        if (sender == locked_ && locked_->checkState() != Qt::PartiallyChecked) {
-            const bool value = locked_->checkState() == Qt::Checked;
-            for (fls::scene::GuideLayer *guide : guides_) {
-                guide->locked = value;
-            }
-        } else if (sender == visible_ && visible_->checkState() != Qt::PartiallyChecked) {
-            const bool value = visible_->checkState() == Qt::Checked;
-            for (fls::scene::GuideLayer *guide : guides_) {
-                guide->visible = value;
-            }
-        } else if (guides_.size() == 1) {
-            fls::scene::GuideLayer *guide = guides_.front();
-            guide->name = name_->text();
-            guide->x = x_->value();
-            guide->y = y_->value();
-            guide->scaleX = scaleX_->value();
-            guide->scaleY = scaleY_->value();
-            guide->rotation = normalizeRotation(rotation_->value());
-            guide->opacity = opacity_->value();
-        } else if (auto *box = qobject_cast<QDoubleSpinBox *>(sender)) {
-            const double old = baselines_.value(box, box->value());
-            const double delta = box->value() - old;
-            baselines_.insert(box, box->value());
-            for (fls::scene::GuideLayer *guide : guides_) {
-                if (property == QStringLiteral("x")) {
-                    guide->x += delta;
-                } else if (property == QStringLiteral("y")) {
-                    guide->y += delta;
-                } else if (property == QStringLiteral("scaleX")) {
-                    guide->scaleX += delta;
-                } else if (property == QStringLiteral("scaleY")) {
-                    guide->scaleY += delta;
-                } else if (property == QStringLiteral("rotation")) {
-                    guide->rotation = normalizeRotation(guide->rotation + delta);
-                } else if (property == QStringLiteral("opacity")) {
-                    guide->opacity = std::clamp(guide->opacity + delta, 0.0, 1.0);
-                }
-            }
-        } else if (auto *line = qobject_cast<QLineEdit *>(sender)) {
-            for (fls::scene::GuideLayer *guide : guides_) {
-                guide->name = line->text();
-            }
+    if (auto *check = qobject_cast<QCheckBox *>(sender)) {
+        if (check->checkState() == Qt::PartiallyChecked) {
+            applyingChange_ = false;
+            return;
         }
-    } else if (!groups_.isEmpty()) {
-        if (sender == name_) {
-            for (fls::scene::Group *group : groups_) {
-                group->name = name_->text();
-            }
-        } else if (sender == opacity_) {
-            for (fls::scene::Group *group : groups_) {
-                state_->setGroupDescendantOpacity(group->id, opacity_->value());
-            }
-        } else if (sender == locked_ && locked_->checkState() != Qt::PartiallyChecked) {
-            const bool value = locked_->checkState() == Qt::Checked;
-            for (fls::scene::Group *group : groups_) {
-                state_->setGroupAndDescendantLocked(group->id, value);
-            }
-        } else if (sender == visible_ && visible_->checkState() != Qt::PartiallyChecked) {
-            const bool value = visible_->checkState() == Qt::Checked;
-            for (fls::scene::Group *group : groups_) {
-                state_->setGroupDescendantVisible(group->id, value);
-            }
-        } else if (sender == mask_ && mask_->checkState() != Qt::PartiallyChecked) {
-            const bool value = mask_->checkState() == Qt::Checked;
-            for (fls::scene::Group *group : groups_) {
-                state_->setGroupDescendantMask(group->id, value);
-            }
-        } else if (auto *box = qobject_cast<QDoubleSpinBox *>(sender); box != nullptr && isTransformProperty(property)) {
-            applyBoxTransform(property, baselines_.value(box, box->value()), box->value());
+        command.value = check->checkState() == Qt::Checked;
+    } else if (auto *box = qobject_cast<QDoubleSpinBox *>(sender)) {
+        const double old = baselines_.value(box, box->value());
+        command.value = box->value();
+        if (isTransformProperty(command.property) && isBoxSelection()) {
+            command.type = EditorCommandType::WorldTransform;
+            command.worldTransform = boxAffine(command.property, old, box->value(), selectionBoxCenter());
+        } else if ((layers_.size() > 1 || guides_.size() > 1) && groups_.isEmpty()) {
+            command.relative = true;
+            command.value = box->value() - old;
         }
-    } else if (sender == locked_ && locked_->checkState() != Qt::PartiallyChecked) {
-        const bool value = locked_->checkState() == Qt::Checked;
-        for (fls::scene::Shape *layer : layers_) {
-            state_->setLayerLockScope(layer->id, value);
-        }
-    } else if (layers_.size() == 1) {
-        applySingle(sender);
-    } else {
-        applyMulti(sender, property);
+        baselines_.insert(box, box->value());
+    } else if (auto *box = qobject_cast<QSpinBox *>(sender)) {
+        command.value = box->value();
+    } else if (auto *line = qobject_cast<QLineEdit *>(sender)) {
+        command.value = line->text();
     }
-    if (transformOnly) {
-        state_->commitTransformCommand();
-    } else {
-        state_->commitProjectEdit();
-    }
-    const QVector<QString> changedIds = transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_);
-    if (property == QStringLiteral("visible") || property == QStringLiteral("mask") || property == QStringLiteral("shapeId")
-        || (property == QStringLiteral("opacity") && guides_.isEmpty())) {
-        state_->noteProjectGeometryChanged(true, changedIds);
-    } else if (property == QStringLiteral("x") || property == QStringLiteral("y") || property == QStringLiteral("scaleX")
-               || property == QStringLiteral("scaleY") || property == QStringLiteral("rotation") || property == QStringLiteral("skew")
-               || property == QStringLiteral("opacity")) {
-        state_->noteProjectGeometryChanged(false, changedIds);
-    } else {
-        state_->noteProjectStructureChanged();
-    }
+    QString error;
+    const bool accepted = state_->executeCommand(command, &error);
     applyingChange_ = false;
-    QMetaObject::invokeMethod(this, [this, refreshLayerIds, refreshGuideIds, refreshGroupIds]() {
-        setSelectionByIds(refreshLayerIds, refreshGuideIds, refreshGroupIds);
-    }, Qt::QueuedConnection);
+    setSelectionByIds(layerIds, guideIds, groupIds);
+    if (!accepted) {
+        sender->setToolTip(error);
+    }
 }
 
 bool PropertyPanel::beginValueLabelDrag(const QString &property, QDoubleSpinBox *box, const QPoint &globalPos) {
-    if (loading_ || valueLabelDragging_ || box == nullptr || !box->isEnabled()
-        || (layers_.isEmpty() && guides_.isEmpty() && groups_.isEmpty())) {
+    if (loading_ || valueLabelDragging_ || box == nullptr || !box->isEnabled() || selectionEntryIds_.isEmpty()) {
         return false;
     }
-    if (!groups_.isEmpty() && property != QStringLiteral("opacity") && !isTransformProperty(property)) {
-        return false;
-    }
-    if (!guides_.isEmpty() && (property == QStringLiteral("skew"))) {
-        return false;
-    }
-    if (!guides_.isEmpty()) {
-        for (const fls::scene::GuideLayer *guide : guides_) {
-            if (guide->locked) {
-                return false;
-            }
+    for (const QString &id : state_->propertyTargets(selectionEntryIds_, property)) {
+        if (state_->isLayerLocked(id)) {
+            return false;
         }
     }
-    if (groups_.isEmpty() && guides_.isEmpty()) {
-        const QSet<QString> lockedIds = state_->lockedLayerIds();
-        for (const fls::scene::Shape *layer : layers_) {
-            if (lockedIds.contains(layer->id)) {
-                return false;
-            }
-        }
-    }
-
     valueLabelDragging_ = true;
     valueLabelProperty_ = property;
     valueLabelBox_ = box;
@@ -1566,80 +1396,31 @@ bool PropertyPanel::beginValueLabelDrag(const QString &property, QDoubleSpinBox 
     valueLabelBoxStartValue_ = box->value();
     valueLabelLayerIds_ = state_->selectedLayerIds();
     valueLabelGuideIds_ = state_->selectedGuideLayerIds();
-    valueLabelGroupIds_.clear();
-    for (const fls::scene::Group *group : groups_) {
-        if (group != nullptr) {
-            valueLabelGroupIds_.push_back(group->id);
-        }
+    valueLabelGroupIds_ = state_->fullySelectedTopGroupIds();
+    valueLabelBoxDrag_ = isBoxSelection() && isTransformProperty(property);
+    valueLabelBoxCenter_ = selectionBoxCenter();
+    valueLabelNodeStartValues_.clear();
+    for (const QString &id : state_->propertyTargets(selectionEntryIds_, property)) {
+        const auto *node = state_->sceneNode(id);
+        double value = box->value();
+        if (property == QStringLiteral("x")) value = node->x;
+        else if (property == QStringLiteral("y")) value = node->y;
+        else if (property == QStringLiteral("scaleX")) value = node->scaleX;
+        else if (property == QStringLiteral("scaleY")) value = node->scaleY;
+        else if (property == QStringLiteral("rotation")) value = node->rotation;
+        else if (property == QStringLiteral("skew")) value = node->skew;
+        else if (const auto *shape = dynamic_cast<const fls::scene::Shape *>(node)) value = opacityFromAlpha(shape->color[3]);
+        else value = node->opacity;
+        valueLabelNodeStartValues_.insert(id, value);
     }
-    valueLabelLayerStartValues_.clear();
-    valueLabelGuideStartValues_.clear();
-    valueLabelGroupStartValues_.clear();
-
     valueLabelUsesTransformCommand_ = isTransformProperty(property);
     if (valueLabelUsesTransformCommand_) {
-        state_->beginTransformCommand(transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
+        state_->beginTransformCommand(selectionEntryIds_);
     } else {
         state_->beginProjectEdit();
     }
-    if (fls::Project *project = state_->project()) {
-        Q_UNUSED(project);
-        setSelectionByIds(valueLabelLayerIds_, valueLabelGuideIds_, valueLabelGroupIds_);
-    }
+    QApplication::setOverrideCursor(QCursor(Qt::SizeVerCursor));
 
-    const auto layerValue = [&](const fls::scene::Shape &layer) {
-        if (property == QStringLiteral("x")) return layer.x;
-        if (property == QStringLiteral("y")) return layer.y;
-        if (property == QStringLiteral("scaleX")) return layer.scaleX;
-        if (property == QStringLiteral("scaleY")) return layer.scaleY;
-        if (property == QStringLiteral("rotation")) return layer.rotation;
-        if (property == QStringLiteral("skew")) return layer.skew;
-        return opacityFromAlpha(layer.color[ColorByteAlpha]);
-    };
-    const auto guideValue = [&](const fls::scene::GuideLayer &guide) {
-        if (property == QStringLiteral("x")) return guide.x;
-        if (property == QStringLiteral("y")) return guide.y;
-        if (property == QStringLiteral("scaleX")) return guide.scaleX;
-        if (property == QStringLiteral("scaleY")) return guide.scaleY;
-        if (property == QStringLiteral("rotation")) return guide.rotation;
-        return guide.opacity;
-    };
-    for (const fls::scene::Shape *layer : layers_) {
-        valueLabelLayerStartValues_.insert(layer->id, layerValue(*layer));
-    }
-    for (const fls::scene::GuideLayer *guide : guides_) {
-        valueLabelGuideStartValues_.insert(guide->id, guideValue(*guide));
-    }
-    for (const QString &groupId : valueLabelGroupIds_) {
-        valueLabelGroupStartValues_.insert(groupId, box->value());
-    }
-
-    valueLabelBoxDrag_ = isBoxSelection() && isTransformProperty(property);
-    valueLabelLayerStartTransforms_.clear();
-    valueLabelGroupStartFrames_.clear();
-    if (valueLabelBoxDrag_) {
-        valueLabelBoxCenter_ = selectionBoxCenter();
-        const QSet<QString> groupedLayerIds = coveredLayerIdsForGroups(state_, groups_);
-        for (const fls::scene::Shape *layer : layers_) {
-            if (groupedLayerIds.contains(layer->id)) {
-                continue;
-            }
-            valueLabelLayerStartTransforms_.insert(layer->id, flatEntryTransform(*layer));
-        }
-        if (state_ != nullptr) {
-            for (const fls::scene::Group *group : groups_) {
-                valueLabelGroupStartFrames_.insert(group->id, state_->groupLocalFrame(group->id));
-            }
-        }
-    }
-
-    QPixmap pixmap(iconAssetPath(QStringLiteral("ToolScaleY.xpm")));
-    if (!pixmap.isNull()) {
-        pixmap = pixmap.scaled(21, 21, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        QApplication::setOverrideCursor(QCursor(pixmap, pixmap.width() / 2, pixmap.height() / 2));
-    } else {
-        QApplication::setOverrideCursor(QCursor(Qt::SizeVerCursor));
-    }
     return true;
 }
 
@@ -1647,106 +1428,35 @@ void PropertyPanel::updateValueLabelDrag(const QPoint &globalPos) {
     if (!valueLabelDragging_ || valueLabelBox_ == nullptr) {
         return;
     }
-
-    const auto step = [this]() {
-        if (valueLabelProperty_ == QStringLiteral("scaleX") || valueLabelProperty_ == QStringLiteral("scaleY")) {
-            return kLabelDragStepScale;
-        }
-        if (valueLabelProperty_ == QStringLiteral("skew")) {
-            return kLabelDragStepSkew;
-        }
-        if (valueLabelProperty_ == QStringLiteral("opacity")) {
-            return kLabelDragStepOpacity;
-        }
-        return kLabelDragStepDefault;
-    };
-    const double delta = static_cast<double>(valueLabelStartGlobal_.y() - globalPos.y()) * step();
-    const auto clampBox = [this](double value) {
-        return std::clamp(value, valueLabelBox_->minimum(), valueLabelBox_->maximum());
-    };
+    const double step = valueLabelProperty_ == QStringLiteral("opacity") ? kLabelDragStepOpacity
+        : valueLabelProperty_ == QStringLiteral("skew") ? kLabelDragStepSkew
+        : valueLabelProperty_ == QStringLiteral("scaleX") || valueLabelProperty_ == QStringLiteral("scaleY")
+            ? kLabelDragStepScale : kLabelDragStepDefault;
+    const double delta = (valueLabelStartGlobal_.y() - globalPos.y()) * step;
     const auto adjusted = [&](double start) {
-        double value = start + delta;
-        if (valueLabelProperty_ == QStringLiteral("rotation")) {
-            return normalizeRotation(value);
-        }
-        return clampBox(value);
+        const double value = start + delta;
+
+        return valueLabelProperty_ == QStringLiteral("rotation") ? normalizeRotation(value)
+            : std::clamp(value, valueLabelBox_->minimum(), valueLabelBox_->maximum());
     };
-
+    EditorCommand command;
+    command.entries = selectionEntryIds_;
+    command.property = valueLabelProperty_;
+    const double proxy = adjusted(valueLabelBoxStartValue_);
     if (valueLabelBoxDrag_) {
-        const double proxy = adjusted(valueLabelBoxStartValue_);
-        const QTransform transform = boxAffine(valueLabelProperty_, valueLabelBoxStartValue_, proxy, valueLabelBoxCenter_);
-        for (fls::scene::Shape *layer : layers_) {
-            if (!valueLabelLayerStartTransforms_.contains(layer->id)) {
-                continue;
-            }
-            const QTransform start = valueLabelLayerStartTransforms_.value(layer->id, flatEntryTransform(*layer));
-            applyDecomposedTransform(layer, localResultForWorldTransform(*layer, start, transform));
-        }
-        if (!valueLabelGroupStartFrames_.isEmpty()) {
-            state_->setGroupFramesFromStart(valueLabelGroupStartFrames_, transform);
-        } {
-            const QSignalBlocker blocker(valueLabelBox_);
-            valueLabelBox_->setValue(proxy);
-        }
-        state_->noteTransformLiveChanged(transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
-        if (globalPos.x() != valueLabelStartGlobal_.x()) {
-            QCursor::setPos(valueLabelStartGlobal_.x(), globalPos.y());
-        }
-        return;
-    }
-
-    for (fls::scene::Shape *layer : layers_) {
-        const double value = adjusted(valueLabelLayerStartValues_.value(layer->id, 0.0));
-        if (valueLabelProperty_ == QStringLiteral("x")) {
-            layer->x = value;
-        } else if (valueLabelProperty_ == QStringLiteral("y")) {
-            layer->y = value;
-        } else if (valueLabelProperty_ == QStringLiteral("scaleX")) {
-            layer->scaleX = value;
-        } else if (valueLabelProperty_ == QStringLiteral("scaleY")) {
-            layer->scaleY = value;
-        } else if (valueLabelProperty_ == QStringLiteral("rotation")) {
-            layer->rotation = value;
-        } else if (valueLabelProperty_ == QStringLiteral("skew")) {
-            layer->skew = value;
-        } else if (valueLabelProperty_ == QStringLiteral("opacity")) {
-            layer->color[ColorByteAlpha] = alphaFromOpacity(value);
+        command.type = EditorCommandType::WorldTransform;
+        command.worldTransform = boxAffine(valueLabelProperty_, valueLabelBox_->value(), proxy, valueLabelBoxCenter_);
+    } else {
+        for (auto it = valueLabelNodeStartValues_.cbegin(); it != valueLabelNodeStartValues_.cend(); ++it) {
+            command.values.insert(it.key(), adjusted(it.value()));
         }
     }
-    for (fls::scene::GuideLayer *guide : guides_) {
-        const double value = adjusted(valueLabelGuideStartValues_.value(guide->id, 0.0));
-        if (valueLabelProperty_ == QStringLiteral("x")) {
-            guide->x = value;
-        } else if (valueLabelProperty_ == QStringLiteral("y")) {
-            guide->y = value;
-        } else if (valueLabelProperty_ == QStringLiteral("scaleX")) {
-            guide->scaleX = value;
-        } else if (valueLabelProperty_ == QStringLiteral("scaleY")) {
-            guide->scaleY = value;
-        } else if (valueLabelProperty_ == QStringLiteral("rotation")) {
-            guide->rotation = value;
-        } else if (valueLabelProperty_ == QStringLiteral("opacity")) {
-            guide->opacity = value;
-        }
-    }
-    for (fls::scene::Group *group : groups_) {
-        const double value = adjusted(valueLabelGroupStartValues_.value(group->id, valueLabelBox_->value()));
-        state_->setGroupDescendantOpacity(group->id, value);
-    }
-
-    {
-        const QSignalBlocker blocker(valueLabelBox_);
-        valueLabelBox_->setValue(adjusted(valueLabelBoxStartValue_));
-    }
+    state_->executeCommand(command);
+    const QSignalBlocker blocker(valueLabelBox_);
+    valueLabelBox_->setValue(proxy);
     if (valueLabelProperty_ == QStringLiteral("opacity")) {
         updateColorButton();
     }
-    if (isTransformProperty(valueLabelProperty_)) {
-        state_->noteTransformLiveChanged(transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
-    } else {
-        state_->noteCanvasRepaint();
-    }
-
     if (globalPos.x() != valueLabelStartGlobal_.x()) {
         QCursor::setPos(valueLabelStartGlobal_.x(), globalPos.y());
     }
@@ -1757,38 +1467,16 @@ void PropertyPanel::endValueLabelDrag(bool commit) {
         return;
     }
     QApplication::restoreOverrideCursor();
-    const QString property = valueLabelProperty_;
     valueLabelDragging_ = false;
-    valueLabelProperty_.clear();
     valueLabelBox_ = nullptr;
-    valueLabelBoxStartValue_ = 0.0;
-    valueLabelBoxDrag_ = false;
-    valueLabelLayerStartValues_.clear();
-    valueLabelGuideStartValues_.clear();
-    valueLabelGroupStartValues_.clear();
-    valueLabelLayerStartTransforms_.clear();
-
     if (commit) {
-        if (valueLabelUsesTransformCommand_) {
-            state_->commitTransformCommand();
-        } else {
-            state_->commitProjectEdit();
-        }
-        const bool refreshPreviews = property == QStringLiteral("opacity") && guides_.isEmpty();
-        state_->noteProjectGeometryChanged(refreshPreviews, transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
+        state_->commitProjectEdit();
+        state_->noteProjectGeometryChanged(!valueLabelUsesTransformCommand_, selectionEntryIds_);
     } else {
-        if (valueLabelUsesTransformCommand_) {
-            state_->cancelTransformCommand();
-        } else {
-            state_->cancelProjectEdit();
-        }
+        state_->cancelProjectEdit();
     }
-    valueLabelUsesTransformCommand_ = false;
-
+    valueLabelNodeStartValues_.clear();
     setSelectionByIds(valueLabelLayerIds_, valueLabelGuideIds_, valueLabelGroupIds_);
-    valueLabelLayerIds_.clear();
-    valueLabelGuideIds_.clear();
-    valueLabelGroupIds_.clear();
 }
 
 void PropertyPanel::detachSelectionForEdit() {
@@ -1843,64 +1531,6 @@ void PropertyPanel::setSelectionByIds(const QSet<QString> &layerIds,
     setSelection(layers, guides, groups, contours);
 }
 
-void PropertyPanel::applySingle(QWidget *sender) {
-    fls::scene::Shape *layer = layers_.front();
-    layer->name = name_->text();
-    if (sender == shapeId_ && !layer->isRaster()) {
-        layer->setVectorShape(static_cast<quint16>(shapeId_->value()));
-    }
-    layer->x = x_->value();
-    layer->y = y_->value();
-    layer->scaleX = scaleX_->value();
-    layer->scaleY = scaleY_->value();
-    layer->rotation = normalizeRotation(rotation_->value());
-    layer->skew = skew_->value();
-    layer->color[ColorByteAlpha] = alphaFromOpacity(opacity_->value());
-    layer->visible = visible_->isChecked();
-    layer->locked = locked_->isChecked();
-    layer->mask = mask_->isChecked();
-}
-
-void PropertyPanel::applyMulti(QWidget *sender, const QString &property) {
-    if (auto *box = qobject_cast<QDoubleSpinBox *>(sender)) {
-        if (isTransformProperty(property)) {
-            applyBoxTransform(property, baselines_.value(box, box->value()), box->value());
-            return;
-        }
-        const double old = baselines_.value(box, box->value());
-        const double delta = box->value() - old;
-        baselines_.insert(box, box->value());
-        for (fls::scene::Shape *layer : layers_) {
-            if (property == QStringLiteral("opacity")) {
-                layer->color[ColorByteAlpha] = alphaFromOpacity(std::clamp(opacityFromAlpha(layer->color[ColorByteAlpha]) + delta, 0.0, 1.0));
-            }
-        }
-    } else if (auto *box = qobject_cast<QSpinBox *>(sender)) {
-        for (fls::scene::Shape *layer : layers_) {
-            if (!layer->isRaster()) {
-                layer->setVectorShape(static_cast<quint16>(box->value()));
-            }
-        }
-    } else if (auto *line = qobject_cast<QLineEdit *>(sender)) {
-        for (fls::scene::Shape *layer : layers_) {
-            layer->name = line->text();
-        }
-    } else if (auto *check = qobject_cast<QCheckBox *>(sender)) {
-        if (check->checkState() == Qt::PartiallyChecked) {
-            return;
-        }
-        const bool value = check->checkState() == Qt::Checked;
-        for (fls::scene::Shape *layer : layers_) {
-            if (property == QStringLiteral("visible")) {
-                layer->visible = value;
-            } else if (property == QStringLiteral("locked")) {
-                layer->locked = value;
-            } else if (property == QStringLiteral("mask")) {
-                layer->mask = value;
-            }
-        }
-    }
-}
 
 QVector<std::array<quint8, 4>> PropertyPanel::selectionColors(bool colorableOnly) const {
     ScopedPerf perf("PropertyPanel::selectionColors");
@@ -1917,17 +1547,9 @@ QVector<std::array<quint8, 4>> PropertyPanel::selectionColors(bool colorableOnly
                               static_cast<quint8>(color.red()), static_cast<quint8>(color.alpha())});
         }
     };
-    for (const fls::scene::Shape *layer : layers_) {
-        appendColor(layer);
-    }
-    for (const fls::scene::ContourFigure *contour : contours_) {
-        appendColor(contour);
-    }
-    for (const fls::scene::Group *group : groups_) {
-        const QVector<QString> ids = state_->leafLayerIdsForEntry(group->id);
-        for (const QString &id : ids) {
-            appendColor(state_->sceneNode(id));
-        }
+    const auto ids = state_->propertyTargets(selectionEntryIds_, colorableOnly ? QStringLiteral("color") : QStringLiteral("opacity"));
+    for (const QString &id : ids) {
+        appendColor(state_->sceneNode(id));
     }
 
     return colors;
@@ -1946,30 +1568,19 @@ std::optional<std::array<quint8, 4>> PropertyPanel::currentSelectionColor() cons
 }
 
 void PropertyPanel::setSelectionColor(const std::array<quint8, 4> &color) {
-    for (fls::scene::Shape *layer : layers_) {
-        if (isColorableShape(layer)) {
-            layer->color = color;
-        }
-    }
-    for (fls::scene::ContourFigure *contour : contours_) {
-        if (!state_->isLayerLocked(contour->id)) {
-            contour->data.fillColor = QColor(color[2], color[1], color[0], color[3]);
-        }
-    }
-    for (fls::scene::Group *group : groups_) {
-        state_->setGroupDescendantColor(group->id, color);
-    }
+    EditorCommand command;
+    command.entries = selectionEntryIds_;
+    command.property = QStringLiteral("color");
+    command.value = QColor(color[2], color[1], color[0], color[3]);
+    const QScopedValueRollback<bool> guard(applyingChange_, true);
+    state_->executeCommand(command);
 }
 
 void PropertyPanel::applyColorToSelection(const std::array<quint8, 4> &color) {
     if (colorableSelectionColors().isEmpty()) {
         return;
     }
-    state_->beginProjectEdit();
-    detachSelectionForEdit();
     setSelectionColor(color);
-    state_->commitProjectEdit();
-    state_->noteProjectGeometryChanged(true, transformTargetIdsForSelection(state_, layers_, guides_, groups_, contours_));
     updateColorButton();
 }
 
