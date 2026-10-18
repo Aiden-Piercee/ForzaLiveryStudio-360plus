@@ -118,12 +118,20 @@ void EditorState::selectLayerAtPoint(const QString &layerId, Qt::KeyboardModifie
             ids.insert(layerId);
         }
     } else if (modifiers & Qt::ShiftModifier) {
-        const QString groupId = topmostGroupForEntry(layerId);
+        const QString groupId = nextGroupForLayerSelection(layerId);
         if (!groupId.isEmpty()) {
+            QSet<QString> guideIds;
+
             ids.clear();
             for (const QString &id : leafLayerIdsForEntry(groupId)) {
                 ids.insert(id);
             }
+            for (const fls::scene::GuideLayer *guide : sceneGuideLeaves(*groupForId(groupId))) {
+                guideIds.insert(guide->id);
+            }
+            setSelectionFromEntries(ids, guideIds, {groupId});
+
+            return;
         } else {
             ids = {layerId};
         }
@@ -131,6 +139,28 @@ void EditorState::selectLayerAtPoint(const QString &layerId, Qt::KeyboardModifie
         ids = {layerId};
     }
     setSelectedLayerIds(ids);
+}
+
+QString EditorState::nextGroupForLayerSelection(const QString &layerId) const {
+    QString groupId = parentGroupForEntry(layerId);
+    const fls::scene::Group *selectedGroup = selectedEntryIds_.size() == 1
+        ? groupForId(selectedEntryIds_.front()) : nullptr;
+
+    if (selectedGroup != nullptr && !selectedGroup->isLiverySection && selectedLayerIds_.contains(layerId)) {
+        for (QString ancestor = groupId; !ancestor.isEmpty(); ancestor = parentGroupForEntry(ancestor)) {
+            if (ancestor != selectedGroup->id) {
+                continue;
+            }
+            const QString parentId = parentGroupForEntry(ancestor);
+            const fls::scene::Group *parent = parentId.isEmpty() ? nullptr : groupForId(parentId);
+
+            groupId = parent != nullptr && !parent->isLiverySection ? parentId : ancestor;
+            break;
+        }
+    }
+    const fls::scene::Group *group = groupId.isEmpty() ? nullptr : groupForId(groupId);
+
+    return group != nullptr && !group->isLiverySection ? groupId : QString();
 }
 
 QVector<QString> EditorState::normalizeEntrySelection(const QVector<QString> &entryIds) const {

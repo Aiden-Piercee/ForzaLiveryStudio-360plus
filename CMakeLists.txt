@@ -465,6 +465,20 @@ if(FLS_BUILD_TESTS)
     target_include_directories(fls_selection_geometry_tests PRIVATE src/gui/canvas src/gui/widgets)
     target_link_libraries(fls_selection_geometry_tests PRIVATE Qt6::Core Qt6::Gui)
     add_test(NAME selection_geometry COMMAND fls_selection_geometry_tests)
+    qt6_wrap_cpp(fls_editor_state_moc src/gui/state/editor_state.h)
+    add_executable(fls_editor_selection_tests
+        ${fls_editor_state_moc}
+        tools/editor_selection_test.cpp
+        src/gui/state/editor_state.h
+        src/gui/state/editor_state.cpp
+        src/gui/state/editor_state_selection.cpp
+        src/gui/state/editor_state_snapshot.cpp
+        src/gui/state/editor_state_clipboard.cpp
+        src/gui/state/editor_state_grouping.cpp)
+    set_target_properties(fls_editor_selection_tests PROPERTIES AUTOMOC OFF AUTOUIC OFF)
+    target_include_directories(fls_editor_selection_tests PRIVATE src/gui/state src/gui/widgets src/gui/fill src/gui/app)
+    target_link_libraries(fls_editor_selection_tests PRIVATE fls_core Qt6::Gui)
+    add_test(NAME editor_selection COMMAND fls_editor_selection_tests)
     add_test(NAME profile_fit_manual COMMAND fls_compact_fit_tests --profile-fit
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/fixtures/catalog_cover_manual.json" 8)
     add_test(NAME profile_fit_large COMMAND fls_compact_fit_tests --profile-fit
@@ -562,9 +576,8 @@ if(FLS_BUILD_TESTS)
     target_link_libraries(fls_wgs_save_writer_tests PRIVATE fls_core Qt6::Core)
     add_test(NAME wgs_save_writer COMMAND fls_wgs_save_writer_tests)
 
-    qt6_wrap_cpp(fls_contour_figure_moc src/gui/state/editor_state.h)
     add_executable(fls_contour_figure_tests
-        ${fls_contour_figure_moc}
+        ${fls_editor_state_moc}
         tools/contour_figure_test.cpp
         src/gui/widgets/property_panel.cpp
         src/gui/app/gui_assets.cpp

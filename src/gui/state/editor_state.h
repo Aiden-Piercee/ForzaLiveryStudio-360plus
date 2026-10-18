@@ -239,6 +239,7 @@ private:
     void ensureRenderCache() const;
     void updateRenderCacheTransforms(const QVector<QString> &targetIds) const;
     QVector<QString> existingEntryIds(const QVector<QString> &entryIds) const;
+    QString nextGroupForLayerSelection(const QString &layerId) const;
     QVector<QString> leafLayerIdsForEntryCached(const QString &entryId, const ProjectIndexCache &cache) const;
     bool entryHasLockedLayerCached(const QString &entryId, const ProjectIndexCache &cache) const;
 

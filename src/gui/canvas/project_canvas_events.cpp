@@ -22,7 +22,8 @@ void ProjectCanvas::refreshHover(const QPointF &point, Qt::KeyboardModifiers mod
         refreshLiningInteractionHint(point, modifiers);
         return;
     }
-    if (tool_ != QStringLiteral("select") && tool_ != QStringLiteral("marquee")) {
+    if (tool_ != QStringLiteral("select") && tool_ != QStringLiteral("marquee")
+        && !(tool_ == QStringLiteral("move") && options_.moveToolAutoSelect)) {
         return;
     }
     const QString id = selectTargetAtScreenPoint(point, modifiers);
@@ -233,52 +234,6 @@ void ProjectCanvas::mousePressEvent(QMouseEvent *event) {
     const bool canPickUnderCursor = picksUnderCursor
         && (tool_ != QStringLiteral("move") || options_.moveToolAutoSelect);
 
-    auto selectMoveAutoTarget = [this, event]() -> bool {
-        const QString target = selectTargetAtScreenPoint(event->position(), {});
-        if (!target.isEmpty()) {
-            const QString groupId = state_->topmostGroupForEntry(target);
-            if (!groupId.isEmpty()) {
-                QSet<QString> leafIds;
-                for (const QString &id : state_->leafLayerIdsForEntry(groupId)) {
-                    leafIds.insert(id);
-                }
-                state_->setSelectionIds(leafIds, {});
-            } else {
-                state_->setSelectionIds({target}, {});
-            }
-            drag_.startSelectionBounds = selectedScreenBounds();
-            return true;
-        }
-        const QString guideTarget = guideAtScreenPoint(event->position());
-        if (!guideTarget.isEmpty()) {
-            state_->setSelectionIds({}, {guideTarget});
-            drag_.startSelectionBounds = selectedScreenBounds();
-            return true;
-        }
-        state_->clearSelection();
-        return false;
-    };
-
-    if (tool_ == QStringLiteral("move")
-        && options_.moveToolAutoSelect
-        && (!options_.allowMoveOutsideBoundingBox
-            || (state_->selectedLayerIds().isEmpty() && state_->selectedGuideLayerIds().isEmpty()))
-        && !selectedScreenBounds().contains(event->position())) {
-        if (!selectMoveAutoTarget()) {
-            event->accept();
-            return;
-        }
-    }
-
-    if (tool_ == QStringLiteral("move")
-        && !options_.moveToolAutoSelect
-        && !options_.allowMoveOutsideBoundingBox
-        && (!state_->selectedLayerIds().isEmpty() || !state_->selectedGuideLayerIds().isEmpty())
-        && !selectedScreenBounds().contains(event->position())) {
-        event->accept();
-        return;
-    }
-
     if (canPickUnderCursor
         && state_->selectedLayerIds().isEmpty()
         && !state_->selectedGuideLayerIds().isEmpty()) {
@@ -309,15 +264,23 @@ void ProjectCanvas::mousePressEvent(QMouseEvent *event) {
         return;
     }
 
+    if (startToolDrag(event->position(), event->modifiers())) {
+        event->accept();
+        return;
+    }
+    QOpenGLWidget::mousePressEvent(event);
+}
+
+bool ProjectCanvas::startToolDrag(const QPointF &screenPoint, Qt::KeyboardModifiers modifiers) {
     drag_.startBox = currentSelectionBox();
     const QPointF boxCenterWorld = drag_.startBox.valid
         ? drag_.startBox.localToWorld.map(drag_.startBox.localRect.center())
         : screenToWorld(drag_.startSelectionBounds.center());
-    beginToolDrag(event->position(), boxCenterWorld);
+    beginToolDrag(screenPoint, boxCenterWorld);
 
     if (drag_.mode != DragMode::None) {
         drag_.duplicated = false;
-        const bool duplicateDrag = (event->modifiers() & Qt::AltModifier)
+        const bool duplicateDrag = (modifiers & Qt::AltModifier)
             && (drag_.mode == DragMode::Move || drag_.mode == DragMode::TransformMove);
         drag_.usesProjectEdit = duplicateDrag || drag_.mode == DragMode::Opacity;
         if (drag_.usesProjectEdit) {
@@ -337,11 +300,11 @@ void ProjectCanvas::mousePressEvent(QMouseEvent *event) {
         if (!drag_.usesProjectEdit) {
             state_->beginTransformCommand(dragTransformTargetIds());
         }
-        updateCursorForPoint(event->position());
-        event->accept();
-        return;
+        updateCursorForPoint(screenPoint);
+        return true;
     }
-    QOpenGLWidget::mousePressEvent(event);
+
+    return false;
 }
 
 void ProjectCanvas::mouseMoveEvent(QMouseEvent *event) {
@@ -467,6 +430,13 @@ void ProjectCanvas::mouseReleaseEvent(QMouseEvent *event) {
 }
 
 void ProjectCanvas::mouseDoubleClickEvent(QMouseEvent *event) {
+    const bool hierarchySelection = tool_ == QStringLiteral("select")
+        || (tool_ == QStringLiteral("move") && options_.moveToolAutoSelect);
+
+    if (hierarchySelection && event->button() == Qt::LeftButton && (event->modifiers() & Qt::ShiftModifier)) {
+        mousePressEvent(event);
+        return;
+    }
     updateViewTransform();
     if (activeTool_ != nullptr && activeTool_->handleDoubleClick(event)) {
         return;

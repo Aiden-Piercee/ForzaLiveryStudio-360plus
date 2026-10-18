@@ -254,6 +254,7 @@ Qt::CursorShape ProjectCanvas::cursorForPoint(const QPointF &point) {
     case DragMode::Rotate:
         return Qt::ArrowCursor;
     case DragMode::None:
+    case DragMode::PendingMove:
         break;
     }
 

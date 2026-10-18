@@ -573,9 +573,6 @@ void MainWindow::setupOptionsMenu() {
                       QStringLiteral("toggle_auto_save_paths"), &BehaviorSettings::autoSavePaths);
     addBehaviorOption(optionsMenu, QStringLiteral("Show Property Debug"), QStringLiteral("toggle_property_debug"), &BehaviorSettings::showPropertyDebug);
     addBehaviorOption(optionsMenu, QStringLiteral("Move Tool Auto-Select"), QStringLiteral("toggle_move_auto_select"), &BehaviorSettings::moveToolAutoSelect);
-    addBehaviorOption(optionsMenu, QStringLiteral("Allow Move Outside Bounding Box"),
-                      QStringLiteral("toggle_allow_move_outside_bounding_box"),
-                      &BehaviorSettings::allowMoveOutsideBoundingBox);
     addBehaviorOption(optionsMenu, QStringLiteral("Pipette Auto-Return"),
                       QStringLiteral("toggle_pipette_auto_return"),
                       &BehaviorSettings::pipetteAutoReturn);
@@ -988,7 +985,6 @@ void MainWindow::applyBehaviorSettings(const BehaviorSettings &settings, bool sa
     }
     if (canvas_ != nullptr) {
         canvas_->setMoveToolAutoSelect(settings.moveToolAutoSelect);
-        canvas_->setAllowMoveOutsideBoundingBox(settings.allowMoveOutsideBoundingBox);
         canvas_->setPipetteAutoReturn(settings.pipetteAutoReturn);
         canvas_->setSelectionFlashEnabled(settings.selectionFlashEnabled);
         canvas_->setDisplayAnchorsDuringTransformDrag(settings.displayAnchorsDuringTransformDrag);

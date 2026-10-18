@@ -55,6 +55,9 @@ public:
     using CanvasTool::CanvasTool;
     QString name() const override;
     bool picksUnderCursor() const override { return true; }
+    bool handlePress(QMouseEvent *event) override;
+    bool handleMove(QMouseEvent *event) override;
+    bool handleRelease(QMouseEvent *event) override;
     void beginDrag(const QPointF &screenPos, const QPointF &boxCenterWorld) override;
     Qt::CursorShape idleCursorShape(const QPointF &point) const override;
 };

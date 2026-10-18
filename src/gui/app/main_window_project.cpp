@@ -435,6 +435,9 @@ void MainWindow::syncTreeSelectionFromIds() {
     QModelIndex firstExactLeaf;
     QModelIndex firstFullGroup;
     QHash<QString, bool> coveredById;
+    const QString selectedGroupId = state_->selectedEntryIds_.size() == 1
+        && state_->entryIsGroup(state_->selectedEntryIds_.front())
+        ? state_->selectedEntryIds_.front() : QString();
     std::function<bool(const QModelIndex &)> coveredFor = [&](const QModelIndex &index) -> bool {
         if (!index.isValid()) {
             return false;
@@ -474,7 +477,9 @@ void MainWindow::syncTreeSelectionFromIds() {
             if (!index.isValid()) {
                 continue;
             }
-            const bool selected = coveredFor(index) && !parentCovered;
+            const bool selected = selectedGroupId.isEmpty()
+                ? coveredFor(index) && !parentCovered
+                : index.data(LayerTreeModel::EntryIdRole).toString() == selectedGroupId;
             if (selected) {
                 tree_->selectionModel()->select(index, QItemSelectionModel::Select | QItemSelectionModel::Rows);
                 if (!firstSelected.isValid()) {

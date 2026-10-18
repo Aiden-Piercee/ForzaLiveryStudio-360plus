@@ -36,6 +36,13 @@ exports grouped `C_group` folders and `C_livery` folders.
   **Select shapes by bounding box** enables rectangular picking instead. Hover
   outlines follow the silhouette in the selection tools. **Show selected-shape
   outlines** is on by default and keeps selected silhouettes visible across tools.
+  Shift-click selects a shape's immediate group. Further Shift-clicks within the
+  selected group climb one parent at a time and stop at the outermost group.
+  Rapid clicks follow the same sequence. Move with **Options → Move Tool Auto-Select** enabled
+  uses the same click selection and hover outlines, and shows the Select cursor
+  when the selection is empty. Starting on empty space clears the selection.
+  Dragging a selected shape keeps the current selection together. With auto-select
+  disabled, Move can drag the current selection from anywhere on the canvas.
   Pipette can return to the previously used tool after a successful
   pick through a persistent, default-on Options toggle.
   Pen builds a closed hard/soft cubic compound contour with editable interior cutouts.

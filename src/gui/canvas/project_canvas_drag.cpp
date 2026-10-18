@@ -945,6 +945,7 @@ bool ProjectCanvas::isTransformDrag() const {
     case DragMode::Rotate:
         return true;
     case DragMode::None:
+    case DragMode::PendingMove:
     case DragMode::Pan:
     case DragMode::Marquee:
         break;

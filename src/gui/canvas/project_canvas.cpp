@@ -188,6 +188,9 @@ void ProjectCanvas::setEditorState(EditorState *state) {
     state_ = state;
     if (state_ != nullptr) {
         connect(state_, &EditorState::selectionChanged, this, &ProjectCanvas::syncPathFigureSelection);
+        connect(state_, &EditorState::selectionChanged, this, [this]() {
+            updateCursorForPoint(mapFromGlobal(QCursor::pos()));
+        });
         connect(state_, &EditorState::projectGeometryChanged, this, &ProjectCanvas::reloadPathFigure);
         connect(state_, &EditorState::canvasRepaintRequested, this, &ProjectCanvas::reloadPathFigure);
         connect(state_, &EditorState::projectStructureChanged, this, &ProjectCanvas::syncPathFigureSelection);
@@ -436,15 +439,18 @@ void ProjectCanvas::setSeparateOpacityAndSkewTools(bool enabled) {
 }
 
 void ProjectCanvas::setMoveToolAutoSelect(bool enabled) {
+    if (options_.moveToolAutoSelect == enabled) {
+        return;
+    }
+    cancelDrag();
     options_.moveToolAutoSelect = enabled;
+    invalidateSelectionCache();
+    updateCursorForPoint(mapFromGlobal(QCursor::pos()));
+    update();
 }
 
 bool ProjectCanvas::moveToolAutoSelect() const {
     return options_.moveToolAutoSelect;
-}
-
-void ProjectCanvas::setAllowMoveOutsideBoundingBox(bool enabled) {
-    options_.allowMoveOutsideBoundingBox = enabled;
 }
 
 void ProjectCanvas::setPipetteAutoReturn(bool enabled) {

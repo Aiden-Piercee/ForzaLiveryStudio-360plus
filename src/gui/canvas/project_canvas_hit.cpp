@@ -4,6 +4,8 @@
 #include "raster_decals.h"
 #include "selection_geometry.h"
 
+#include <algorithm>
+
 namespace gui {
 
 using namespace pc_detail;
@@ -189,7 +191,7 @@ QString ProjectCanvas::selectTargetAtScreenPoint(const QPointF &point, Qt::Keybo
     if (hits.isEmpty()) {
         return {};
     }
-    if (modifiers & Qt::ControlModifier) {
+    if (modifiers & (Qt::ControlModifier | Qt::ShiftModifier)) {
         return hits.front();
     }
 
@@ -204,6 +206,59 @@ QString ProjectCanvas::selectTargetAtScreenPoint(const QPointF &point, Qt::Keybo
         }
     }
     return target;
+}
+
+void ProjectCanvas::selectAtScreenPoint(const QPointF &point, Qt::KeyboardModifiers modifiers) {
+    const QString target = selectTargetAtScreenPoint(point, modifiers);
+    const QString guideTarget = target.isEmpty() ? guideAtScreenPoint(point) : QString();
+
+    if (state_ == nullptr) {
+        return;
+    }
+    if (!target.isEmpty()) {
+        state_->selectLayerAtPoint(target, modifiers);
+    } else if (!guideTarget.isEmpty()) {
+        QSet<QString> guides = state_->selectedGuideLayerIds();
+        if (modifiers & Qt::ControlModifier) {
+            if (guides.contains(guideTarget)) {
+                guides.remove(guideTarget);
+            } else {
+                guides.insert(guideTarget);
+            }
+            state_->setSelectionIds(state_->selectedLayerIds(), guides);
+        } else {
+            state_->setSelectionIds({}, {guideTarget});
+        }
+    } else {
+        state_->clearSelection();
+    }
+    updateCursorForPoint(point);
+}
+
+bool ProjectCanvas::prepareMoveAutoSelection(Qt::KeyboardModifiers modifiers) {
+    if (state_ == nullptr) {
+        return false;
+    }
+    const QVector<QString> hits = layersAtScreenPoint(drag_.startScreen);
+    const QString guideTarget = hits.isEmpty() ? guideAtScreenPoint(drag_.startScreen) : QString();
+    const QSet<QString> selected = state_->selectedLayerIds();
+    const bool touchesSelection = (!hits.isEmpty() && selected.contains(hits.front()))
+        || (!guideTarget.isEmpty() && state_->selectedGuideLayerIds().contains(guideTarget));
+
+    if (hits.isEmpty() && guideTarget.isEmpty()) {
+        state_->clearSelection();
+
+        return false;
+    }
+    if (!touchesSelection) {
+        if (!hits.isEmpty()) {
+            state_->selectLayerAtPoint(hits.front(), modifiers);
+        } else {
+            selectAtScreenPoint(drag_.startScreen, modifiers);
+        }
+    }
+
+    return !state_->selectedLayerIds().isEmpty() || !state_->selectedGuideLayerIds().isEmpty();
 }
 
 const QRectF &ProjectCanvas::cachedSelectionWorldBounds() const {

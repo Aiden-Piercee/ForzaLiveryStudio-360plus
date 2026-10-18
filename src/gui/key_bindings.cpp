@@ -255,7 +255,6 @@ QKeySequence defaultShortcut(const QString &id) {
         {QStringLiteral("toggle_insert_last_scale"), {}},
         {QStringLiteral("toggle_property_debug"), {}},
         {QStringLiteral("toggle_move_auto_select"), {}},
-        {QStringLiteral("toggle_allow_move_outside_bounding_box"), {}},
         {QStringLiteral("toggle_selection_flash"), QKeySequence(QStringLiteral("\\"))},
         {QStringLiteral("show_guidelines"), QKeySequence(Qt::CTRL | Qt::Key_Semicolon)},
         {QStringLiteral("toggle_guidelines_locked"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Semicolon)},

@@ -92,35 +92,73 @@ bool SelectTool::handleRelease(QMouseEvent *event) {
     if (marquee) {
         c.finishDrag();
     }
-    const QString target = c.selectTargetAtScreenPoint(event->position(), event->modifiers());
-    const QString guideTarget = target.isEmpty() ? c.guideAtScreenPoint(event->position()) : QString();
-    if (c.state_ != nullptr) {
-        if (!target.isEmpty()) {
-            c.state_->selectLayerAtPoint(target, event->modifiers());
-        } else if (!guideTarget.isEmpty()) {
-            QSet<QString> guides = c.state_->selectedGuideLayerIds();
-            if (event->modifiers() & Qt::ControlModifier) {
-                if (guides.contains(guideTarget)) {
-                    guides.remove(guideTarget);
-                } else {
-                    guides.insert(guideTarget);
-                }
-                c.state_->setSelectionIds(c.state_->selectedLayerIds(), guides);
-            } else {
-                c.state_->setSelectionIds({}, {guideTarget});
-            }
-        } else {
-            c.state_->clearSelection();
-        }
-    }
+    c.selectAtScreenPoint(event->position(), event->modifiers());
     c.refreshHover(event->position(), event->modifiers());
     event->accept();
     return true;
 }
 
-
 QString MoveTool::name() const {
     return QStringLiteral("move");
+}
+
+bool MoveTool::handlePress(QMouseEvent *event) {
+    ProjectCanvas &c = canvas_;
+    if (!c.options_.moveToolAutoSelect) {
+        return false;
+    }
+    if (c.state_ != nullptr && c.layersAtScreenPoint(event->position()).isEmpty()
+        && c.guideAtScreenPoint(event->position()).isEmpty()) {
+        c.state_->clearSelection();
+    }
+    c.drag_.mode = ProjectCanvas::DragMode::PendingMove;
+    c.updateCursorForPoint(event->position());
+    event->accept();
+
+    return true;
+}
+
+bool MoveTool::handleMove(QMouseEvent *event) {
+    ProjectCanvas &c = canvas_;
+    if (c.drag_.mode != ProjectCanvas::DragMode::PendingMove) {
+        return false;
+    }
+    if (c.movedPastClickThreshold(event->position()) && c.prepareMoveAutoSelection(event->modifiers())) {
+        c.drag_.mode = ProjectCanvas::DragMode::None;
+        if (c.startToolDrag(c.drag_.startScreen, event->modifiers())) {
+            c.applyMoveDrag(event->position(), event->modifiers());
+        }
+    }
+    event->accept();
+
+    return true;
+}
+
+bool MoveTool::handleRelease(QMouseEvent *event) {
+    ProjectCanvas &c = canvas_;
+    if (!c.options_.moveToolAutoSelect || event->button() != Qt::LeftButton
+        || (c.drag_.mode != ProjectCanvas::DragMode::PendingMove
+            && c.drag_.mode != ProjectCanvas::DragMode::Move)) {
+        return false;
+    }
+    const bool click = c.drag_.mode == ProjectCanvas::DragMode::PendingMove
+        && !c.movedPastClickThreshold(event->position());
+
+    if (c.drag_.mode == ProjectCanvas::DragMode::PendingMove && !click) {
+        handleMove(event);
+    }
+    if (c.drag_.mode == ProjectCanvas::DragMode::Move) {
+        c.applyMoveDrag(event->position(), event->modifiers());
+    }
+    c.finishDrag();
+    if (click) {
+        c.selectAtScreenPoint(event->position(), event->modifiers());
+    }
+    c.refreshHover(event->position(), event->modifiers());
+    c.updateCursorForPoint(event->position());
+    event->accept();
+
+    return true;
 }
 
 void MoveTool::beginDrag(const QPointF &screenPos, const QPointF &boxCenterWorld) {
@@ -131,6 +169,13 @@ void MoveTool::beginDrag(const QPointF &screenPos, const QPointF &boxCenterWorld
 
 Qt::CursorShape MoveTool::idleCursorShape(const QPointF &point) const {
     Q_UNUSED(point);
+
+    if (canvas_.options_.moveToolAutoSelect
+        && (canvas_.state_ == nullptr
+            || (canvas_.state_->selectedLayerIds().isEmpty() && canvas_.state_->selectedGuideLayerIds().isEmpty()))) {
+        return Qt::ArrowCursor;
+    }
+
     return Qt::SizeAllCursor;
 }
 
@@ -185,8 +230,7 @@ void TransformTool::beginDrag(const QPointF &screenPos, const QPointF &boxCenter
         c.captureScaleReference();
     } else if (c.rotateZoneAt(screenPos, c.drag_.startBox)) {
         c.beginRotateDrag(boxCenterWorld);
-    } else if (c.options_.allowMoveOutsideBoundingBox
-               || c.boxContainsScreenPoint(c.drag_.startBox, screenPos)) {
+    } else {
         c.drag_.mode = ProjectCanvas::DragMode::TransformMove;
     }
 }

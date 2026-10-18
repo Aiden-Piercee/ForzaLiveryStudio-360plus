@@ -43,7 +43,6 @@ struct BehaviorSettings {
     bool autoSavePaths = false;
     bool showPropertyDebug = false;
     bool moveToolAutoSelect = false;
-    bool allowMoveOutsideBoundingBox = true;
     bool pipetteAutoReturn = true;
     bool selectionFlashEnabled = true;
     bool displayAnchorsDuringTransformDrag = true;

@@ -62,7 +62,6 @@ public:
     void setTransformRelativeMode(bool relative);
     void setMoveToolAutoSelect(bool enabled);
     bool moveToolAutoSelect() const;
-    void setAllowMoveOutsideBoundingBox(bool enabled);
     void setPipetteAutoReturn(bool enabled);
     void setSelectionFlashEnabled(bool enabled);
     bool selectionFlashEnabled() const;
@@ -187,6 +186,7 @@ private:
     enum class DragMode {
         None,
         Pan,
+        PendingMove,
         Move,
         Marquee,
         TransformMove,
@@ -378,7 +378,6 @@ private:
         QSize borderResolution = kDefaultVisibilityBorderResolution;
         bool transformRelativeMode = false;
         bool moveToolAutoSelect = false;
-        bool allowMoveOutsideBoundingBox = true;
         bool pipetteAutoReturn = true;
         bool displayAnchorsDuringTransformDrag = true;
         bool separateSelectAndMarqueeTools = false;
@@ -408,6 +407,8 @@ private:
     QVector<QString> layersAtScreenPoint(const QPointF &point);
     std::optional<QColor> layerColorAtScreenPoint(const QPointF &point) const;
     QString selectTargetAtScreenPoint(const QPointF &point, Qt::KeyboardModifiers modifiers);
+    void selectAtScreenPoint(const QPointF &point, Qt::KeyboardModifiers modifiers);
+    bool prepareMoveAutoSelection(Qt::KeyboardModifiers modifiers);
     QRectF selectedScreenBounds() const;
     QRectF selectedWorldBounds() const;
     const QRectF &cachedSelectionWorldBounds() const;
@@ -424,6 +425,7 @@ private:
     QVector<QString> dragTransformTargetIds() const;
     void captureScaleReference();
     void beginToolDrag(const QPointF &screenPos, const QPointF &boxCenterWorld);
+    bool startToolDrag(const QPointF &screenPoint, Qt::KeyboardModifiers modifiers);
     void beginRotateDrag(const QPointF &boxCenterWorld);
     void applyMoveDrag(const QPointF &screenPoint, Qt::KeyboardModifiers modifiers);
     bool nudgeSelection(const QPointF &delta);
