@@ -12,6 +12,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPalette>
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalBlocker>
@@ -33,8 +34,9 @@ constexpr char kDescriptorSettingsKey[] = "export/wgsDescriptor";
 class ExportAssetDialog final : public QDialog {
 public:
     ExportAssetDialog(QWidget *parent, const QString &startDirectory,
-                      const QString &projectName, bool livery, int carId)
-        : QDialog(parent), pgsDirectory_(startDirectory), livery_(livery), carId_(carId) {
+                      const QString &projectName, bool livery, int carId, quint64 maskedLayerCount)
+        : QDialog(parent), pgsDirectory_(startDirectory), livery_(livery), carId_(carId),
+          maskedLayerCount_(maskedLayerCount) {
         setWindowTitle(QStringLiteral("Export"));
         setModal(true);
         resize(kDialogWidth, kDialogHeight);
@@ -126,6 +128,16 @@ public:
         hint_->setWordWrap(true);
         hint_->setTextInteractionFlags(Qt::TextSelectableByMouse);
         layout->addWidget(hint_);
+        maskWarning_ = new QLabel(QStringLiteral("Project contains %1 masked layers, will be discarded")
+            .arg(maskedLayerCount_), this);
+        maskWarning_->setObjectName(QStringLiteral("exportMaskWarning"));
+        maskWarning_->setTextFormat(Qt::PlainText);
+        maskWarning_->setWordWrap(true);
+        maskWarning_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        QPalette warningPalette = maskWarning_->palette();
+        warningPalette.setColor(QPalette::WindowText, Qt::yellow);
+        maskWarning_->setPalette(warningPalette);
+        layout->addWidget(maskWarning_);
         buttons_ = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
         buttons_->button(QDialogButtonBox::Save)->setText(QStringLiteral("Export"));
         layout->addWidget(buttons_);
@@ -179,6 +191,8 @@ private:
         const int wgsIndex = containerFormat_->findData(static_cast<int>(ExportContainerFormat::WgsContainer));
         const bool supported = static_cast<ExportGameVersion>(gameVersion_->currentData().toInt()) == ExportGameVersion::Horizon5;
 
+        maskWarning_->setVisible(maskedLayerCount_ > 0 && !fls::exportGameSupportsMasks(
+            static_cast<ExportGameVersion>(gameVersion_->currentData().toInt())));
         model->item(wgsIndex)->setEnabled(supported);
         model->item(wgsIndex)->setToolTip(QStringLiteral("FH5 existing-slot replacement"));
         if (!supported && wgsSelected()) {
@@ -277,6 +291,7 @@ private:
     QComboBox *gameVersion_ = nullptr;
     QComboBox *containerFormat_ = nullptr;
     QLabel *hint_ = nullptr;
+    QLabel *maskWarning_ = nullptr;
     QLabel *folderHint_ = nullptr;
     QPushButton *browse_ = nullptr;
     QGroupBox *wgsOptions_ = nullptr;
@@ -287,13 +302,15 @@ private:
     bool livery_ = false;
     bool wgsActive_ = false;
     int carId_ = 0;
+    quint64 maskedLayerCount_ = 0;
 };
 
 } // namespace
 
 std::optional<ExportAssetSelection> showExportAssetDialog(
-    QWidget *parent, const QString &startDirectory, const QString &projectName, bool livery, int carId) {
-    ExportAssetDialog dialog(parent, startDirectory, projectName, livery, carId);
+    QWidget *parent, const QString &startDirectory, const QString &projectName, bool livery,
+    int carId, quint64 maskedLayerCount) {
+    ExportAssetDialog dialog(parent, startDirectory, projectName, livery, carId, maskedLayerCount);
     if (dialog.exec() != QDialog::Accepted) {
         return std::nullopt;
     }

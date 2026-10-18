@@ -38,6 +38,7 @@ constexpr int kMotorsportEntryCountOffset = 58;
 constexpr int kMotorsportEntriesOffset = 62;
 constexpr int kEarlyEntryCountOffset = 41;
 constexpr int kTaggedLiveryOverhead = 40;
+constexpr int kMaskFlag = 64;
 constexpr quint32 kLastEarlyLiveryVersion = 7;
 constexpr quint32 kDefaultPaintFinish = 0;
 constexpr quint32 kDefaultPaintSelector = 0xffffffffu;
@@ -276,13 +277,55 @@ bool containsArtwork(const scene::Layer &layer) {
     return false;
 }
 
-Project nativeArtworkProject(const Project &project, const ExportProfile &profile) {
+quint64 maskedLayerCount(const scene::Layer &layer, bool inheritedMask) {
+    if (!layer.visible) {
+        return 0;
+    }
+    if (layer.kind() == scene::LayerKind::Shape) {
+        return inheritedMask || static_cast<const scene::Shape &>(layer).mask ? 1 : 0;
+    }
+    quint64 count = 0;
+    if (layer.kind() == scene::LayerKind::Group) {
+        const auto &group = static_cast<const scene::Group &>(layer);
+        const bool masked = inheritedMask || (group.flags & kMaskFlag) != 0;
+
+        for (const auto &child : group.children) {
+            count += maskedLayerCount(*child, masked);
+        }
+    }
+
+    return count;
+}
+
+void discardMaskedLayers(scene::Group &group, bool inheritedMask = false) {
+    auto &children = group.children;
+    const bool masked = inheritedMask || (group.flags & kMaskFlag) != 0;
+
+    children.erase(std::remove_if(children.begin(), children.end(), [masked](const auto &child) {
+        if (child->kind() == scene::LayerKind::Shape) {
+            return masked || static_cast<const scene::Shape &>(*child).mask;
+        }
+        if (child->kind() == scene::LayerKind::Group) {
+            auto &childGroup = static_cast<scene::Group &>(*child);
+            discardMaskedLayers(childGroup, masked);
+
+            return !childGroup.isLiverySection && !containsArtwork(childGroup);
+        }
+
+        return false;
+    }), children.end());
+}
+
+Project nativeArtworkProject(const Project &project, const ExportProfile &profile, ExportGameVersion game) {
     Project artwork = project;
     std::array<bool, 11> sections{};
     if (artwork.root == nullptr) {
         return artwork;
     }
     prepareNativeArtworkLayers(*artwork.root);
+    if (!exportGameSupportsMasks(game)) {
+        discardMaskedLayers(*artwork.root);
+    }
     auto &children = artwork.root->children;
     children.erase(std::remove_if(children.begin(), children.end(), [](const auto &child) {
         return child->kind() == scene::LayerKind::Group
@@ -407,9 +450,9 @@ QByteArray earlyArtwork(const Project &project, const ExportProfile &profile,
     return artwork;
 }
 
-QByteArray nativeArtwork(const Project &project, const ExportProfile &profile,
+QByteArray nativeArtwork(const Project &project, const ExportProfile &profile, ExportGameVersion game,
                          std::array<int, 11> &counts) {
-    const Project artworkProject = nativeArtworkProject(project, profile);
+    const Project artworkProject = nativeArtworkProject(project, profile, game);
     if (profile.liveryVersion <= kLastEarlyLiveryVersion) {
         return earlyArtwork(artworkProject, profile, counts);
     }
@@ -428,7 +471,7 @@ QByteArray nativeLiveryPayload(const Project &project, ExportGameVersion game,
     const bool early = profile.liveryVersion <= kLastEarlyLiveryVersion;
     const bool tagged = profile.liveryVersion != 2;
     const QByteArray paint = legacyPaintBlock(project, profile);
-    const QByteArray artwork = nativeArtwork(project, profile, counts);
+    const QByteArray artwork = nativeArtwork(project, profile, game, counts);
     QByteArray payload("vlrc", 4);
     QByteArray sourceEntries;
     const QByteArray &source = project.liverySource;
@@ -569,6 +612,22 @@ QString exportThumbnailName(ExportGameVersion game, bool livery) {
     return livery ? QStringLiteral("bigThumb.webp") : QStringLiteral("thumb.webp");
 }
 
+bool exportGameSupportsMasks(ExportGameVersion game) {
+    switch (game) {
+    case ExportGameVersion::Horizon2:
+    case ExportGameVersion::Horizon3:
+    case ExportGameVersion::Motorsport5:
+    case ExportGameVersion::Motorsport6:
+        return false;
+    default:
+        return true;
+    }
+}
+
+quint64 exportMaskedLayerCount(const Project &project) {
+    return project.root ? maskedLayerCount(*project.root, false) : 0;
+}
+
 QByteArray encodeGameLiveryPayload(const Project &project, ExportGameVersion game) {
     if (game == ExportGameVersion::Horizon6) {
         return encodeCLiveryPayload(project);
@@ -614,11 +673,14 @@ void exportGameGroup(const Project &project, const QString &outputFolder,
     if (project.isLivery || project.root == nullptr) {
         throw std::runtime_error("not a group project");
     }
-    const quint64 count = visibleShapeCount(*project.root);
+    Project nativeProject = project;
+    if (!exportGameSupportsMasks(game)) {
+        discardMaskedLayers(*nativeProject.root);
+    }
+    const quint64 count = visibleShapeCount(*nativeProject.root);
     if (count > std::numeric_limits<quint32>::max()) {
         throw std::runtime_error("too many group shapes for header metadata");
     }
-    Project nativeProject = project;
     nativeProject.sourceDecPrefix.clear();
     const QByteArray payload = buildNestedPayload(nativeProject, spriteSize,
                                                  exportProfile(game).groupGeneration);

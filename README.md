@@ -94,9 +94,12 @@ The import/export for groups is fully supported, core functionality in place. So
 | Version     | Group          | Livery        |
 |-------------|----------------|---------------| 
 | Horizon 6   | Import/Export  | Import/Export |
-| Horizon 5   | Import         | Import        |
+| Horizon 5   | Import/Export  | Import/Export |
+| Horizon 3   | Import/Export  | Import/Export |
 | Horizon 2   | Import/Export  | Import/Export |
 | Motosport 5 | Import/Export  | Import/Export |
+| Motosport 6 | Import/Export  | Import/Export |
+| Motosport 7 | Import/Export  | Import/Export |
 | Motosport 23| Import         | Import        |
 
 ## Documentation
@@ -120,6 +123,7 @@ The import/export for groups is fully supported, core functionality in place. So
 
 - [Fr4g3z](https://github.com/Fr4g3z) - cool guy, helped a lot, complained a lot, format reversing.
 - Mixbob - lazy bastard, tested ingame, usage feedback.
+- Mark from Forza Mods - tested exported liveries/groups ingame for older titles.
 - [Zloysvin](https://github.com/Zloysvin) - PR Manager / shape renamer.
 - [Pengyss](https://github.com/Pengyss) - non-uniform group tranform algorithm.
 - Eaterrius - big money man, provided tokens.

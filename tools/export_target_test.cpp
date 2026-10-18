@@ -25,6 +25,40 @@ QByteArray readFile(const QString &path) {
     return file.readAll();
 }
 
+void testMaskWarning(const QString &directory, bool livery, quint64 maskCount) {
+    bool checked = false;
+    QTimer::singleShot(0, [&checked, maskCount]() {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        if (!dialog) {
+            QApplication::exit(1);
+            return;
+        }
+        auto *warning = dialog->findChild<QLabel *>("exportMaskWarning");
+        for (auto *combo : dialog->findChildren<QComboBox *>()) {
+            if (combo->findText("Forza Horizon 6") < 0 || !warning) {
+                continue;
+            }
+            checked = warning->isHidden();
+            for (const auto game : {fls::ExportGameVersion::Horizon2, fls::ExportGameVersion::Horizon3,
+                    fls::ExportGameVersion::Motorsport5, fls::ExportGameVersion::Motorsport6,
+                    fls::ExportGameVersion::Horizon4, fls::ExportGameVersion::Horizon5,
+                    fls::ExportGameVersion::Horizon6, fls::ExportGameVersion::Motorsport7,
+                    fls::ExportGameVersion::Motorsport2023}) {
+                combo->setCurrentIndex(combo->findData(static_cast<int>(game)));
+                const bool expected = maskCount > 0 && !fls::exportGameSupportsMasks(game);
+                checked &= warning->isHidden() == !expected;
+                checked &= warning->text() == QString("Project contains %1 masked layers, will be discarded").arg(maskCount);
+                checked &= warning->palette().color(QPalette::WindowText) == QColor(Qt::yellow);
+                checked &= dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->isEnabled();
+            }
+            break;
+        }
+        dialog->reject();
+    });
+    gui::showExportAssetDialog(nullptr, directory, "Mask test", livery, 1069, maskCount);
+    require(checked, "mask warning visibility, count, color, or export availability");
+}
+
 void testSelection(const QString &directory, bool livery) {
     require(QDir().mkpath(directory), "export destination directory");
     bool selected = false;
@@ -100,6 +134,10 @@ int main(int argc, char *argv[]) {
         require(output.isValid(), "temporary directory");
         testSelection(QDir(output.path()).filePath("group"), false);
         testSelection(QDir(output.path()).filePath("livery"), true);
+        for (bool livery : {false, true}) {
+            testMaskWarning(output.path(), livery, 7);
+            testMaskWarning(output.path(), livery, 0);
+        }
         qInfo() << "FH5 export target selection passed for groups and liveries";
         return 0;
     } catch (const std::exception &error) {

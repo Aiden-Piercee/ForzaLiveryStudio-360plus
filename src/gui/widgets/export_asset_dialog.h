@@ -26,6 +26,7 @@ struct ExportAssetSelection {
 };
 
 std::optional<ExportAssetSelection> showExportAssetDialog(
-    QWidget *parent, const QString &startDirectory, const QString &projectName, bool livery, int carId = 0);
+    QWidget *parent, const QString &startDirectory, const QString &projectName, bool livery,
+    int carId = 0, quint64 maskedLayerCount = 0);
 
 } // namespace gui

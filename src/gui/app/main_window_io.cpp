@@ -1128,7 +1128,8 @@ void MainWindow::exportDialog() {
         importBrowserStartDirectory(QStringLiteral("exportFolder"), {QStringLiteral("exportNested")}),
         state_->project_.name,
         state_->project_.isLivery,
-        state_->project_.carId);
+        state_->project_.carId,
+        fls::exportMaskedLayerCount(state_->project_));
     if (!selection) {
         return;
     }

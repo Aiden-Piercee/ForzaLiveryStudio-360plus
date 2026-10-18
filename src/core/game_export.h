@@ -18,6 +18,8 @@ enum class ExportGameVersion {
 };
 
 QString exportThumbnailName(ExportGameVersion game, bool livery);
+bool exportGameSupportsMasks(ExportGameVersion game);
+quint64 exportMaskedLayerCount(const Project &project);
 QByteArray encodeGameLiveryPayload(const Project &project, ExportGameVersion game);
 void exportGameLivery(const Project &project, const QString &outputFolder,
                       ExportGameVersion game);

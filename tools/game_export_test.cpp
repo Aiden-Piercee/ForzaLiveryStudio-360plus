@@ -193,20 +193,32 @@ void testLiveries(const QString &root) {
         fls::ExportGameVersion::Horizon4};
     const std::array<quint32, 9> versions = {7, 6, 9, 0, 1, 0, 0, 2, 4};
     const std::array<int, 9> envelopes = {51, 50, 66, 49, 50, 45, 49, 50, 50};
+    const std::array<bool, 9> supportsMasks = {true, true, true, false, false, false, false, true, true};
     for (int gameIndex = 0; gameIndex < static_cast<int>(games.size()); ++gameIndex) {
         const auto game = games[gameIndex];
+        require(fls::exportGameSupportsMasks(game) == supportsMasks[gameIndex], "game mask support");
         const int sections = gameIndex == 0 ? 11 : 6;
         for (int nested = 0; nested < 2; ++nested) {
             auto project = makeLivery(sections, nested != 0);
+            auto expected = project;
+            if (nested && !fls::exportGameSupportsMasks(game)) {
+                for (auto &section : expected.root->children) {
+                    auto &group = static_cast<fls::scene::Group &>(
+                        *static_cast<fls::scene::Group &>(*section).children.front());
+                    group.takeAt(0);
+                }
+            }
+            const int expectedCount = shapeCount(*expected.root);
             const QString folder = QDir(root).filePath(QStringLiteral("livery-%1-%2").arg(gameIndex).arg(nested));
             fls::exportGameLivery(project, folder, game);
             const auto header = fls::parseHeader(readFile(QDir(folder).filePath(QStringLiteral("header"))));
             require(header.formatVersion == versions[gameIndex], "header version");
-            require(header.carId == 1069 && header.typeValue == static_cast<quint32>(sections * (nested + 1)), "header counts/car");
+            require(header.carId == 1069 && header.typeValue == static_cast<quint32>(expectedCount), "header counts/car");
             require(header.creatorName == QStringLiteral("Exporter"), "creator");
             const auto imported = gameIndex == 2 ? fls::importFM2023Asset(folder) : fls::importCLivery(folder);
-            require(shapeCount(*imported.root) == sections * (nested + 1), QStringLiteral("livery shape count %1/%2").arg(gameIndex).arg(nested));
-            compareArtwork(project, imported, QStringLiteral("generated %1/%2").arg(gameIndex).arg(nested));
+            require(shapeCount(*imported.root) == expectedCount, QStringLiteral("livery shape count %1/%2").arg(gameIndex).arg(nested));
+            compareArtwork(expected, imported, QStringLiteral("generated %1/%2").arg(gameIndex).arg(nested));
+            require(fls::exportMaskedLayerCount(project) == (nested ? sections : 0), "livery source masks preserved");
             const auto raw = fls::encodeGameLiveryPayload(project, game);
             require(fls::detail::readLeU32(raw, 8) == 0, "unlocked payload");
             require(raw.indexOf(QByteArray("gyvl", 4)) == envelopes[gameIndex], "root envelope");
@@ -268,11 +280,75 @@ void testGroups(const QString &root) {
         fls::exportGameGroup(project, folder, game);
         const auto imported = game == fls::ExportGameVersion::Motorsport2023
             ? fls::importFM2023Asset(folder) : fls::importCGroupNested(folder);
-        require(shapeCount(*imported.root) == 3, "group shape count");
-        compareArtwork(project, imported, "generated group", true);
+        auto expected = project;
+        if (!fls::exportGameSupportsMasks(game)) {
+            static_cast<fls::scene::Group &>(*expected.root->children.front()).takeAt(0);
+        }
+        const int expectedCount = shapeCount(*expected.root);
+        require(shapeCount(*imported.root) == expectedCount, "group shape count");
+        compareArtwork(expected, imported, "generated group", true);
         const auto header = fls::parseHeader(readFile(QDir(folder).filePath(QStringLiteral("header"))));
-        require(header.typeValue == 3 && header.carId == 0, "group header counts");
+        require(header.typeValue == expectedCount && header.carId == 0, "group header counts");
+        require(fls::exportMaskedLayerCount(project) == 1 && shapeCount(*project.root) == 3, "group source masks preserved");
         require(!QFile::exists(QDir(folder).filePath(QStringLiteral("container.1"))), "no WGS descriptor");
+    }
+}
+
+void testDiscardedMasks(const QString &root) {
+    using Game = fls::ExportGameVersion;
+    for (const auto game : {Game::Horizon2, Game::Horizon3, Game::Motorsport5, Game::Motorsport6}) {
+        for (bool livery : {false, true}) {
+            auto project = makeLivery(6, true);
+            if (!livery) {
+                project.root = std::unique_ptr<fls::scene::Group>(
+                    static_cast<fls::scene::Group *>(project.root->takeAt(0).release()));
+                project.root->isLiverySection = false;
+                project.isLivery = false;
+                project.carId = 0;
+            }
+            auto &section = livery
+                ? static_cast<fls::scene::Group &>(*project.root->children.front()) : *project.root;
+            auto inherited = std::make_unique<fls::scene::Group>();
+            inherited->flags = 64;
+            inherited->append(makeShape(40));
+            auto descendant = std::make_unique<fls::scene::Group>();
+            descendant->append(makeShape(41));
+            inherited->append(std::move(descendant));
+            section.append(std::move(inherited));
+            auto emptyAfterDiscard = std::make_unique<fls::scene::Group>();
+            auto mask = makeShape(42);
+            mask->mask = true;
+            emptyAfterDiscard->append(std::move(mask));
+            emptyAfterDiscard->append(std::make_unique<fls::scene::GuideLayer>());
+            section.append(std::move(emptyAfterDiscard));
+            auto hidden = std::make_unique<fls::scene::Group>();
+            hidden->visible = false;
+            auto hiddenMask = makeShape(43);
+            hiddenMask->mask = true;
+            hidden->append(std::move(hiddenMask));
+            section.append(std::move(hidden));
+            require(fls::exportMaskedLayerCount(project) == (livery ? 9 : 4), "visible inherited mask count");
+            const QString folder = QDir(root).filePath(QString("discard-masks-%1-%2").arg(int(game)).arg(livery));
+            if (livery) {
+                fls::exportGameLivery(project, folder, game);
+            } else {
+                fls::exportGameGroup(project, folder, game);
+            }
+            const auto imported = livery ? fls::importCLivery(folder) : fls::importCGroupNested(folder);
+            const int expectedCount = livery ? 6 : 1;
+            require(shapeCount(*imported.root) == expectedCount, "masked subtrees discarded");
+            require(fls::exportMaskedLayerCount(imported) == 0, "export contains no masks");
+            const auto header = fls::parseHeader(readFile(QDir(folder).filePath("header")));
+            require(header.typeValue == expectedCount, "discarded masks excluded from header count");
+            require(fls::exportMaskedLayerCount(project) == (livery ? 9 : 4), "source inherited masks preserved");
+            if (livery) {
+                for (auto &child : project.root->children) {
+                    static_cast<fls::scene::Group &>(*child).flags = 64;
+                }
+                fls::exportGameLivery(project, folder, game);
+                require(shapeCount(*fls::importCLivery(folder).root) == 0, "mask-only livery exports empty sections");
+            }
+        }
     }
 }
 
@@ -911,6 +987,8 @@ int main(int argc, char *argv[]) {
         testHorizonLiveryGroupBoundaries(temporary.path());
         qInfo() << "Testing generated groups";
         testGroups(temporary.path());
+        qInfo() << "Testing discarded masks";
+        testDiscardedMasks(temporary.path());
         qInfo() << "Testing sparse sections, bounds, and blocks";
         testBoundsAndBlocks(temporary.path());
         if (app.arguments().size() == 3 && app.arguments()[1] == QStringLiteral("--samples")) {
