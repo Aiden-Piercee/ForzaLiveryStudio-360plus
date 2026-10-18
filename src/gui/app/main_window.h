@@ -260,6 +260,7 @@ private:
     QLabel *liningMarginLabel_ = nullptr;
     QDoubleSpinBox *liningMarginSpin_ = nullptr;
     QToolBar *toolBar_ = nullptr;
+    QAction *marqueeToolAction_ = nullptr;
     QAction *skewToolAction_ = nullptr;
     QAction *opacityToolAction_ = nullptr;
     QTimer *autosaveTimer_ = nullptr;

@@ -58,21 +58,39 @@ QString SelectTool::name() const {
 }
 
 bool SelectTool::handlePress(QMouseEvent *event) {
+    ProjectCanvas &c = canvas_;
+    if (!c.options_.separateSelectAndMarqueeTools) {
+        c.drag_.mode = ProjectCanvas::DragMode::Marquee;
+        c.drag_.marqueeRect = {};
+        c.hoverLayerId_.clear();
+        c.hoverBody_ = {};
+        c.update();
+    }
     event->accept();
     return true;
 }
 
 bool SelectTool::handleRelease(QMouseEvent *event) {
     ProjectCanvas &c = canvas_;
-    if (event->button() != Qt::LeftButton || c.drag_.mode != ProjectCanvas::DragMode::None) {
+    const bool marquee = c.drag_.mode == ProjectCanvas::DragMode::Marquee;
+    if (event->button() != Qt::LeftButton
+        || (c.drag_.mode != ProjectCanvas::DragMode::None && !marquee)) {
         return false;
     }
     if (c.movedPastClickThreshold(event->position())) {
+        if (marquee) {
+            c.drag_.marqueeRect = QRectF(c.drag_.startScreen, event->position()).normalized();
+            c.selectByMarquee(event->modifiers());
+            c.finishDrag();
+        }
         c.hoverLayerId_.clear();
-        c.hoverPolygon_ = {};
+        c.hoverBody_ = {};
         c.update();
         event->accept();
         return true;
+    }
+    if (marquee) {
+        c.finishDrag();
     }
     const QString target = c.selectTargetAtScreenPoint(event->position(), event->modifiers());
     const QString guideTarget = target.isEmpty() ? c.guideAtScreenPoint(event->position()) : QString();
@@ -136,6 +154,7 @@ bool MarqueeTool::handleRelease(QMouseEvent *event) {
         return false;
     }
     if (c.movedPastClickThreshold(event->position())) {
+        c.drag_.marqueeRect = QRectF(c.drag_.startScreen, event->position()).normalized();
         c.selectByMarquee(event->modifiers());
     } else if (c.state_ != nullptr) {
         c.state_->clearSelection();

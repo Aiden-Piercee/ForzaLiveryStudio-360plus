@@ -1,11 +1,43 @@
 #include "project_canvas.h"
 
 #include "project_canvas_internal.h"
+#include "raster_decals.h"
+#include "selection_geometry.h"
 
 namespace gui {
 
 using namespace pc_detail;
 
+
+QPainterPath ProjectCanvas::shapeSelectionBody(const fls::scene::Shape &shape) {
+    if (shape.raster) {
+        const auto found = rasterSelectionBodies_.constFind(shape.rasterId);
+        if (found != rasterSelectionBodies_.cend()) {
+            return found.value();
+        }
+        const fls::RasterDecal decal = fls::sharedRasterDecals().decal(shape.rasterId);
+        QPainterPath body;
+
+        if (decal.valid()) {
+            const QImage image(reinterpret_cast<const uchar *>(decal.rgba.constData()),
+                               decal.width, decal.height, decal.width * 4, QImage::Format_RGBA8888);
+            body = rasterSelectionBody(image);
+        }
+        rasterSelectionBodies_.insert(shape.rasterId, body);
+
+        return body;
+    }
+    const auto found = vectorSelectionBodies_.constFind(shape.shapeId);
+    if (found != vectorSelectionBodies_.cend()) {
+        return found.value();
+    }
+    const ShapeGeometry *geometry = geometry_.shape(shape.shapeId);
+    const QPainterPath body = geometry != nullptr ? vectorSelectionBody(*geometry) : QPainterPath();
+
+    vectorSelectionBodies_.insert(shape.shapeId, body);
+
+    return body;
+}
 
 QVector<ProjectCanvas::HitEntry> ProjectCanvas::hitEntries() {
     if (!hitCacheDirty_) {
@@ -14,10 +46,18 @@ QVector<ProjectCanvas::HitEntry> ProjectCanvas::hitEntries() {
     updateViewTransform();
     hitCache_.clear();
     forEachSceneShape([&](const fls::scene::Shape &shape, const QTransform &world, int drawOrder) {
-        if (shape.visible) {
-            const QPolygonF polygon = screenQuad(world, sceneLocalRect(shape, geometry_));
-            hitCache_.push_back({drawOrder, shape.id, polygon, polygon.boundingRect()});
+        for (const fls::scene::Layer *node = &shape; node != nullptr; node = node->parent()) {
+            if (!node->visible) {
+                return true;
+            }
         }
+        const QSize rasterSize = shape.raster ? fls::sharedRasterDecals().decalSize(shape.rasterId) : QSize();
+        const QRectF localBounds = rasterSize.isValid()
+            ? sceneLocalRect(QSizeF(rasterSize)) : sceneLocalRect(shape, geometry_);
+        const QPolygonF polygon = screenQuad(world, localBounds);
+        const QPainterPath body = (world * camera_.matrix()).map(shapeSelectionBody(shape));
+
+        hitCache_.push_back({drawOrder, shape.id, polygon, polygon.boundingRect(), body});
         return true;
     }, /*reverse=*/true);
     hitCacheDirty_ = false;
@@ -135,7 +175,9 @@ std::optional<QColor> ProjectCanvas::colorAtScreenPoint(const QPointF &point) co
 QVector<QString> ProjectCanvas::layersAtScreenPoint(const QPointF &point) {
     QVector<QString> ids;
     for (const HitEntry &entry : hitEntries()) {
-        if (entry.screenBounds.contains(point) && pointInPolygon(point, entry.screenPolygon)) {
+        if (options_.selectShapesByBoundingBox
+                ? entry.screenBounds.contains(point) && pointInPolygon(point, entry.screenPolygon)
+                : entry.screenBody.contains(point)) {
             ids.push_back(entry.layerId);
         }
     }

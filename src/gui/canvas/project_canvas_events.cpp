@@ -22,7 +22,7 @@ void ProjectCanvas::refreshHover(const QPointF &point, Qt::KeyboardModifiers mod
         refreshLiningInteractionHint(point, modifiers);
         return;
     }
-    if (tool_ != QStringLiteral("select")) {
+    if (tool_ != QStringLiteral("select") && tool_ != QStringLiteral("marquee")) {
         return;
     }
     const QString id = selectTargetAtScreenPoint(point, modifiers);
@@ -30,10 +30,10 @@ void ProjectCanvas::refreshHover(const QPointF &point, Qt::KeyboardModifiers mod
         return;
     }
     hoverLayerId_ = id;
-    hoverPolygon_ = {};
+    hoverBody_ = {};
     for (const HitEntry &entry : hitEntries()) {
         if (entry.layerId == id) {
-            hoverPolygon_ = entry.screenPolygon;
+            hoverBody_ = entry.screenBody;
             break;
         }
     }
@@ -48,16 +48,22 @@ void ProjectCanvas::selectByMarquee(Qt::KeyboardModifiers modifiers) {
         ? state_->selectedLayerIds()
         : QSet<QString>{};
     for (const HitEntry &entry : hitEntries()) {
-        if (drag_.marqueeRect.contains(entry.screenBounds.center())) {
+        QPainterPath bounds;
+        bounds.addPolygon(entry.screenPolygon);
+        bounds.closeSubpath();
+        if ((options_.selectShapesByBoundingBox ? bounds : entry.screenBody).intersects(drag_.marqueeRect)) {
             ids.insert(entry.layerId);
         }
     }
     if (state_ != nullptr) {
-        QSet<QString> guideIds;
-        forEachSceneGuide([&](const fls::scene::GuideLayer &guide, const QTransform &world, const QString &) {
-            if (guide.visible) {
-                const QRectF bounds = screenQuad(world, sceneLocalRect(guide, geometry_)).boundingRect();
-                if (drag_.marqueeRect.contains(bounds.center())) {
+        QSet<QString> guideIds = (modifiers & (Qt::ShiftModifier | Qt::ControlModifier))
+            ? state_->selectedGuideLayerIds() : QSet<QString>{};
+        forEachSceneGuide([&](const fls::scene::GuideLayer &guide, const QTransform &world, const QString &sectionGroupId) {
+            if (guide.visible && options_.guideLayersVisible && isSectionActive(sectionGroupId)) {
+                QPainterPath bounds;
+                bounds.addPolygon(screenQuad(world, sceneLocalRect(guide, geometry_)));
+                bounds.closeSubpath();
+                if (bounds.intersects(drag_.marqueeRect)) {
                     guideIds.insert(guide.id);
                 }
             }
@@ -367,7 +373,8 @@ void ProjectCanvas::mouseMoveEvent(QMouseEvent *event) {
     }
     if (drag_.mode == DragMode::Marquee) {
         updateCursorForPoint(event->position());
-        const QRectF nextRect = QRectF(drag_.startScreen, event->position()).normalized();
+        const QRectF nextRect = movedPastClickThreshold(event->position())
+            ? QRectF(drag_.startScreen, event->position()).normalized() : QRectF();
         if (nextRect != drag_.marqueeRect) {
             drag_.marqueeRect = nextRect;
             update();
@@ -581,7 +588,7 @@ bool ProjectCanvas::handleKeyBinding(KeyInteraction interaction, KeyEventPhase p
                 state_->clearSelection();
             }
             hoverLayerId_.clear();
-            hoverPolygon_ = {};
+            hoverBody_ = {};
             updateSelectionFlashState();
             update();
             return true;
@@ -677,7 +684,7 @@ void ProjectCanvas::focusOutEvent(QFocusEvent *event) {
 
 void ProjectCanvas::leaveEvent(QEvent *event) {
     hoverLayerId_.clear();
-    hoverPolygon_ = {};
+    hoverBody_ = {};
     clearCursorHint();
     if (tool_ == QStringLiteral("bucket")) {
         clearBucketPreview();

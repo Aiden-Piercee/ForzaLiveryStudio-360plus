@@ -668,7 +668,8 @@ void MainWindow::setupToolbar() {
     QAction *selectTool = addTool(QStringLiteral("Select"), QStringLiteral("select"), QStringLiteral("ToolbarSelect.xpm"));
     toolGroup->addAction(selectTool);
     toolGroup->addAction(addTool(QStringLiteral("Move"), QStringLiteral("move"), QStringLiteral("ToolbarMove.xpm")));
-    toolGroup->addAction(addTool(QStringLiteral("Marquee"), QStringLiteral("marquee"), QStringLiteral("ToolbarMarquee.xpm")));
+    marqueeToolAction_ = addTool(QStringLiteral("Marquee"), QStringLiteral("marquee"), QStringLiteral("ToolbarMarquee.xpm"));
+    toolGroup->addAction(marqueeToolAction_);
     toolGroup->addAction(addTool(QStringLiteral("Transform"), QStringLiteral("transform"), QStringLiteral("ToolbarScale.xpm")));
     skewToolAction_ = addTool(QStringLiteral("Skew"), QStringLiteral("skew"), QStringLiteral("ToolbarSkew.xpm"));
     toolGroup->addAction(skewToolAction_);
@@ -720,6 +721,7 @@ void MainWindow::setupToolbar() {
     addAction(placeTextAction);
     connect(placeTextAction, &QAction::triggered, this, [this]() { placeTextDialog(); });
     const BehaviorSettings settings = loadBehaviorSettings();
+    marqueeToolAction_->setVisible(settings.separateSelectAndMarqueeTools);
     skewToolAction_->setVisible(settings.separateOpacityAndSkewTools);
     opacityToolAction_->setVisible(settings.separateOpacityAndSkewTools);
     applyToolbarStyle(settings.verticalToolbar);
@@ -990,6 +992,9 @@ void MainWindow::applyBehaviorSettings(const BehaviorSettings &settings, bool sa
         canvas_->setPipetteAutoReturn(settings.pipetteAutoReturn);
         canvas_->setSelectionFlashEnabled(settings.selectionFlashEnabled);
         canvas_->setDisplayAnchorsDuringTransformDrag(settings.displayAnchorsDuringTransformDrag);
+        canvas_->setSeparateSelectAndMarqueeTools(settings.separateSelectAndMarqueeTools);
+        canvas_->setSelectShapesByBoundingBox(settings.selectShapesByBoundingBox);
+        canvas_->setShowSelectedShapeOutlines(settings.showSelectedShapeOutlines);
         canvas_->setSeparateOpacityAndSkewTools(settings.separateOpacityAndSkewTools);
         canvas_->setGuideLayersVisible(settings.guideLayersVisible);
         canvas_->setGuideLayersOnTop(settings.guideLayersOnTop);
@@ -1004,6 +1009,9 @@ void MainWindow::applyBehaviorSettings(const BehaviorSettings &settings, bool sa
                 || canvas_->tool() == QStringLiteral("opacity"))) {
             canvas_->setTool(QStringLiteral("transform"));
         }
+    }
+    if (marqueeToolAction_ != nullptr) {
+        marqueeToolAction_->setVisible(settings.separateSelectAndMarqueeTools);
     }
     if (skewToolAction_ != nullptr) {
         skewToolAction_->setVisible(settings.separateOpacityAndSkewTools);

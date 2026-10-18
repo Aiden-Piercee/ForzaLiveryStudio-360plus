@@ -203,6 +203,12 @@ BehaviorSettings loadBehaviorSettings() {
     result.pasteInPlace = settings.value(
         QStringLiteral("ui/behavior/pasteInPlace"), result.pasteInPlace).toBool();
     result.verticalToolbar = settings.value(QStringLiteral("ui/behavior/verticalToolbar"), result.verticalToolbar).toBool();
+    result.separateSelectAndMarqueeTools = settings.value(
+        QStringLiteral("ui/behavior/separateSelectAndMarqueeTools"), result.separateSelectAndMarqueeTools).toBool();
+    result.selectShapesByBoundingBox = settings.value(
+        QStringLiteral("ui/behavior/selectShapesByBoundingBox"), result.selectShapesByBoundingBox).toBool();
+    result.showSelectedShapeOutlines = settings.value(
+        QStringLiteral("ui/behavior/showSelectedShapeOutlines"), result.showSelectedShapeOutlines).toBool();
     result.separateOpacityAndSkewTools = settings.value(
         QStringLiteral("ui/behavior/separateOpacityAndSkewTools"),
         result.separateOpacityAndSkewTools).toBool();
@@ -256,6 +262,9 @@ void saveBehaviorSettings(const BehaviorSettings &settings) {
     qsettings.setValue(QStringLiteral("ui/behavior/loadCarTextures"), settings.loadCarTextures);
     qsettings.setValue(QStringLiteral("ui/behavior/pasteInPlace"), settings.pasteInPlace);
     qsettings.setValue(QStringLiteral("ui/behavior/verticalToolbar"), settings.verticalToolbar);
+    qsettings.setValue(QStringLiteral("ui/behavior/separateSelectAndMarqueeTools"), settings.separateSelectAndMarqueeTools);
+    qsettings.setValue(QStringLiteral("ui/behavior/selectShapesByBoundingBox"), settings.selectShapesByBoundingBox);
+    qsettings.setValue(QStringLiteral("ui/behavior/showSelectedShapeOutlines"), settings.showSelectedShapeOutlines);
     qsettings.setValue(QStringLiteral("ui/behavior/separateOpacityAndSkewTools"),
                        settings.separateOpacityAndSkewTools);
 }

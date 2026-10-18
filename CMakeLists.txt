@@ -282,6 +282,8 @@ qt_add_executable(${FORZA_LIVERY_STUDIO_TARGET} WIN32
     src/gui/canvas/project_canvas_pen.cpp
     src/gui/canvas/project_canvas.h
     src/gui/canvas/project_canvas_internal.h
+    src/gui/canvas/selection_geometry.cpp
+    src/gui/canvas/selection_geometry.h
     src/gui/canvas/project_canvas_hit.cpp
     src/gui/canvas/project_canvas_drag.cpp
     src/gui/canvas/project_canvas_cursor.cpp
@@ -459,6 +461,10 @@ if(FLS_BUILD_TESTS)
     target_include_directories(fls_behavior_settings_tests PRIVATE src/gui/app)
     target_link_libraries(fls_behavior_settings_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
     add_test(NAME behavior_settings COMMAND fls_behavior_settings_tests)
+    add_executable(fls_selection_geometry_tests tools/selection_geometry_test.cpp src/gui/canvas/selection_geometry.cpp)
+    target_include_directories(fls_selection_geometry_tests PRIVATE src/gui/canvas src/gui/widgets)
+    target_link_libraries(fls_selection_geometry_tests PRIVATE Qt6::Core Qt6::Gui)
+    add_test(NAME selection_geometry COMMAND fls_selection_geometry_tests)
     add_test(NAME profile_fit_manual COMMAND fls_compact_fit_tests --profile-fit
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/fixtures/catalog_cover_manual.json" 8)
     add_test(NAME profile_fit_large COMMAND fls_compact_fit_tests --profile-fit

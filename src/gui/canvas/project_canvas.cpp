@@ -199,6 +199,8 @@ void ProjectCanvas::setEditorState(EditorState *state) {
 bool ProjectCanvas::loadGeometry(QString *error) {
     geometryLoaded_ = geometry_.loadDefault(error);
     rendererGeometryDirty_ = true;
+    vectorSelectionBodies_.clear();
+    rasterSelectionBodies_.clear();
     invalidateSceneCache();
     update();
     return geometryLoaded_;
@@ -212,7 +214,9 @@ QRectF ProjectCanvas::shapeInkBounds(int shapeId) const {
     return geometry_.shapeInkBounds(shapeId);
 }
 
-void ProjectCanvas::setTool(const QString &tool) {
+void ProjectCanvas::setTool(const QString &requestedTool) {
+    const QString tool = requestedTool == QStringLiteral("marquee")
+        && !options_.separateSelectAndMarqueeTools ? QStringLiteral("select") : requestedTool;
     CanvasTool *next = nullptr;
     for (const std::unique_ptr<CanvasTool> &candidate : tools_) {
         if (candidate->name() == tool) {
@@ -247,7 +251,7 @@ void ProjectCanvas::setTool(const QString &tool) {
     tool_ = tool;
     activeTool_ = next;
     hoverLayerId_.clear();
-    hoverPolygon_ = {};
+    hoverBody_ = {};
     if (state_ != nullptr) {
         state_->setToolName(tool_);
     }
@@ -270,7 +274,7 @@ void ProjectCanvas::invalidateSelectionCache() {
     hitCacheDirty_ = true;
     selectionWorldBoundsCache_.reset();
     hoverLayerId_.clear();
-    hoverPolygon_ = {};
+    hoverBody_ = {};
     updateSelectionFlashState();
 }
 
@@ -389,6 +393,36 @@ void ProjectCanvas::setTransformRelativeMode(bool relative) {
     frame_.layerSignature.clear();
     frame_.guideSignature.clear();
     invalidateSelectionCache();
+    update();
+}
+
+void ProjectCanvas::setSeparateSelectAndMarqueeTools(bool enabled) {
+    if (options_.separateSelectAndMarqueeTools == enabled) {
+        return;
+    }
+    cancelDrag();
+    options_.separateSelectAndMarqueeTools = enabled;
+    if (!enabled && tool_ == QStringLiteral("marquee")) {
+        setTool(QStringLiteral("select"));
+    }
+    invalidateSelectionCache();
+    update();
+}
+
+void ProjectCanvas::setSelectShapesByBoundingBox(bool enabled) {
+    if (options_.selectShapesByBoundingBox == enabled) {
+        return;
+    }
+    options_.selectShapesByBoundingBox = enabled;
+    invalidateSelectionCache();
+    update();
+}
+
+void ProjectCanvas::setShowSelectedShapeOutlines(bool enabled) {
+    if (options_.showSelectedShapeOutlines == enabled) {
+        return;
+    }
+    options_.showSelectedShapeOutlines = enabled;
     update();
 }
 

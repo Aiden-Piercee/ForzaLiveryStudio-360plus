@@ -65,6 +65,9 @@ struct BehaviorSettings {
     bool loadCarTextures = false;
     bool pasteInPlace = false;
     bool verticalToolbar = false;
+    bool separateSelectAndMarqueeTools = false;
+    bool selectShapesByBoundingBox = false;
+    bool showSelectedShapeOutlines = true;
     bool separateOpacityAndSkewTools = false;
 };
 

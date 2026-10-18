@@ -29,7 +29,14 @@ exports grouped `C_group` folders and `C_livery` folders.
 - Drag/drop projects (`.3so`), `C_group`/`C_livery` files/folders, and
   image guide layers from Explorer.
 - Edit layers with Select, Move, Marquee, Transform, Rotate, Pipette, Pen, and Lining
-  canvas tools. Pipette can return to the previously used tool after a successful
+  canvas tools. Select combines click selection with drag marquee selection by
+  default. **Settings → Tools → Separate Select and Marquee tools** restores the
+  separate tools. Picking follows each shape's body, including holes and raster
+  transparency; marquees select shapes whose bodies intersect the rectangle.
+  **Select shapes by bounding box** enables rectangular picking instead. Hover
+  outlines follow the silhouette in the selection tools. **Show selected-shape
+  outlines** is on by default and keeps selected silhouettes visible across tools.
+  Pipette can return to the previously used tool after a successful
   pick through a persistent, default-on Options toggle.
   Pen builds a closed hard/soft cubic compound contour with editable interior cutouts.
   **Edit → Save Pen or Lining Path as Figure** stores the active path as a layer

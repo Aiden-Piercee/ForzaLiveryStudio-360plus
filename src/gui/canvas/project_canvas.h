@@ -67,6 +67,9 @@ public:
     void setSelectionFlashEnabled(bool enabled);
     bool selectionFlashEnabled() const;
     void setDisplayAnchorsDuringTransformDrag(bool enabled);
+    void setSeparateSelectAndMarqueeTools(bool enabled);
+    void setSelectShapesByBoundingBox(bool enabled);
+    void setShowSelectedShapeOutlines(bool enabled);
     void setSeparateOpacityAndSkewTools(bool enabled);
     void setGuideLayersVisible(bool visible);
     void setGuideLayersOnTop(bool enabled);
@@ -204,6 +207,7 @@ private:
         QString layerId;
         QPolygonF screenPolygon;
         QRectF screenBounds;
+        QPainterPath screenBody;
     };
 
     struct CachedPenSegment {
@@ -377,6 +381,9 @@ private:
         bool allowMoveOutsideBoundingBox = true;
         bool pipetteAutoReturn = true;
         bool displayAnchorsDuringTransformDrag = true;
+        bool separateSelectAndMarqueeTools = false;
+        bool selectShapesByBoundingBox = false;
+        bool showSelectedShapeOutlines = true;
         bool separateOpacityAndSkewTools = false;
         bool guideLayersVisible = true;
         bool guideLayersOnTop = true;
@@ -396,6 +403,7 @@ private:
                            bool reverse) const;
     void forEachSceneGuide(const std::function<bool(const fls::scene::GuideLayer &, const QTransform &, const QString &)> &visit,
                            bool reverse) const;
+    QPainterPath shapeSelectionBody(const fls::scene::Shape &shape);
     QVector<HitEntry> hitEntries();
     QVector<QString> layersAtScreenPoint(const QPointF &point);
     std::optional<QColor> layerColorAtScreenPoint(const QPointF &point) const;
@@ -597,7 +605,9 @@ private:
     QPointF cursorHintPoint_;
     QStringList cursorHintLines_;
     QString hoverLayerId_;
-    QPolygonF hoverPolygon_;
+    QPainterPath hoverBody_;
+    QHash<int, QPainterPath> vectorSelectionBodies_;
+    QHash<quint32, QPainterPath> rasterSelectionBodies_;
     QVector<HitEntry> hitCache_;
     bool hitCacheDirty_ = true;
     NativeShapeRenderer renderer_;

@@ -22,6 +22,20 @@ int main(int argc, char **argv) {
         const auto require = [](bool condition) { if (!condition) { throw std::runtime_error("Contour fill settings mismatch"); } };
         require(gui::loadBehaviorSettings().contourFillMode == gui::ContourFillMode::Analytic);
         require(!gui::loadBehaviorSettings().autoSavePaths);
+        require(!gui::loadBehaviorSettings().separateSelectAndMarqueeTools);
+        require(!gui::loadBehaviorSettings().selectShapesByBoundingBox);
+        require(gui::loadBehaviorSettings().showSelectedShapeOutlines);
+        for (int flags = 0; flags < 8; ++flags) {
+            auto behavior = gui::loadBehaviorSettings();
+            behavior.separateSelectAndMarqueeTools = (flags & 1) != 0;
+            behavior.selectShapesByBoundingBox = (flags & 2) != 0;
+            behavior.showSelectedShapeOutlines = (flags & 4) != 0;
+            gui::saveBehaviorSettings(behavior);
+            const auto restored = gui::loadBehaviorSettings();
+            require(restored.separateSelectAndMarqueeTools == behavior.separateSelectAndMarqueeTools);
+            require(restored.selectShapesByBoundingBox == behavior.selectShapesByBoundingBox);
+            require(restored.showSelectedShapeOutlines == behavior.showSelectedShapeOutlines);
+        }
         for (bool enabled : {true, false}) {
             auto behavior = gui::loadBehaviorSettings();
             behavior.autoSavePaths = enabled;

@@ -395,6 +395,18 @@ SettingsDialog::SettingsDialog(UiTheme theme,
     toolbarViewCombo_->setCurrentIndex(behaviorSettings_.verticalToolbar ? 1 : 0);
     addSettingRow(toolsPage, QStringLiteral("tools.toolbar_view"),
                   QStringLiteral("Toolbar view"), toolbarViewCombo_, tips);
+    separateSelectAndMarqueeToolsCheck_ = new QCheckBox(toolsPage.widget);
+    separateSelectAndMarqueeToolsCheck_->setChecked(behaviorSettings_.separateSelectAndMarqueeTools);
+    addSettingRow(toolsPage, QStringLiteral("tools.separate_select_marquee"),
+                  QStringLiteral("Separate Select and Marquee tools"), separateSelectAndMarqueeToolsCheck_, tips);
+    selectShapesByBoundingBoxCheck_ = new QCheckBox(toolsPage.widget);
+    selectShapesByBoundingBoxCheck_->setChecked(behaviorSettings_.selectShapesByBoundingBox);
+    addSettingRow(toolsPage, QStringLiteral("tools.select_bounding_box"),
+                  QStringLiteral("Select shapes by bounding box"), selectShapesByBoundingBoxCheck_, tips);
+    showSelectedShapeOutlinesCheck_ = new QCheckBox(toolsPage.widget);
+    showSelectedShapeOutlinesCheck_->setChecked(behaviorSettings_.showSelectedShapeOutlines);
+    addSettingRow(toolsPage, QStringLiteral("tools.selected_outlines"),
+                  QStringLiteral("Show selected-shape outlines"), showSelectedShapeOutlinesCheck_, tips);
     separateOpacityAndSkewToolsCheck_ = new QCheckBox(toolsPage.widget);
     separateOpacityAndSkewToolsCheck_->setChecked(
         behaviorSettings_.separateOpacityAndSkewTools);
@@ -608,6 +620,9 @@ BehaviorSettings SettingsDialog::selectedBehaviorSettings() const {
     result.valueEditingWheelEnabled = valueEditingWheelCheck_->isChecked();
     result.pasteInPlace = pasteInPlace_->isChecked();
     result.verticalToolbar = toolbarViewCombo_->currentData().toBool();
+    result.separateSelectAndMarqueeTools = separateSelectAndMarqueeToolsCheck_->isChecked();
+    result.selectShapesByBoundingBox = selectShapesByBoundingBoxCheck_->isChecked();
+    result.showSelectedShapeOutlines = showSelectedShapeOutlinesCheck_->isChecked();
     result.separateOpacityAndSkewTools = separateOpacityAndSkewToolsCheck_->isChecked();
     result.gameFolder = gameFolder_->text().trimmed();
     result.discardModelOnLiveryOpen = discardModelOnLiveryOpen_->isChecked();

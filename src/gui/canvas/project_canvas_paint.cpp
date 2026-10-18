@@ -668,12 +668,25 @@ void ProjectCanvas::drawOverlay(QPainter &painter) {
     drawBucketOverlay(painter);
     drawVisibilityBorders(painter);
 
-    if (!hoverPolygon_.isEmpty()) {
+    const auto drawShapeOutline = [&](const QPainterPath &body) {
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(kOverlayHaloColor, kHoverHaloWidth));
-        painter.drawPolygon(hoverPolygon_);
+        painter.drawPath(body);
         painter.setPen(QPen(kSelectionAccentColor, kHoverAccentWidth));
-        painter.drawPolygon(hoverPolygon_);
+        painter.drawPath(body);
+    };
+    if (options_.showSelectedShapeOutlines && state_ != nullptr) {
+        const QSet<QString> selected = state_->selectedLayerIds();
+        if (!selected.isEmpty()) {
+            for (const HitEntry &entry : hitEntries()) {
+                if (selected.contains(entry.layerId) && entry.layerId != hoverLayerId_) {
+                    drawShapeOutline(entry.screenBody);
+                }
+            }
+        }
+    }
+    if (!hoverBody_.isEmpty()) {
+        drawShapeOutline(hoverBody_);
     }
 
     const SelectionBox box = currentSelectionBox();

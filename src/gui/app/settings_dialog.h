@@ -85,6 +85,9 @@ private:
     QCheckBox *loadCarTextures_ = nullptr;
     QCheckBox *pasteInPlace_ = nullptr;
     QComboBox *toolbarViewCombo_ = nullptr;
+    QCheckBox *separateSelectAndMarqueeToolsCheck_ = nullptr;
+    QCheckBox *selectShapesByBoundingBoxCheck_ = nullptr;
+    QCheckBox *showSelectedShapeOutlinesCheck_ = nullptr;
     QCheckBox *separateOpacityAndSkewToolsCheck_ = nullptr;
     QCheckBox *valueEditingWheelCheck_ = nullptr;
     QComboBox *systemIconSetCombo_ = nullptr;
