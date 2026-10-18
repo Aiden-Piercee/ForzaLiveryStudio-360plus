@@ -107,7 +107,9 @@ bool MoveTool::handlePress(QMouseEvent *event) {
     if (!c.options_.moveToolAutoSelect) {
         return false;
     }
-    if (c.state_ != nullptr && c.layersAtScreenPoint(event->position()).isEmpty()
+    c.drag_.startBox = c.currentSelectionBox();
+    if (c.state_ != nullptr && !c.boxContainsScreenPoint(c.drag_.startBox, event->position())
+        && c.layersAtScreenPoint(event->position()).isEmpty()
         && c.guideAtScreenPoint(event->position()).isEmpty()) {
         c.state_->clearSelection();
     }
@@ -143,6 +145,7 @@ bool MoveTool::handleRelease(QMouseEvent *event) {
     }
     const bool click = c.drag_.mode == ProjectCanvas::DragMode::PendingMove
         && !c.movedPastClickThreshold(event->position());
+    const bool selectOnClick = click && !c.boxContainsScreenPoint(c.drag_.startBox, c.drag_.startScreen);
 
     if (c.drag_.mode == ProjectCanvas::DragMode::PendingMove && !click) {
         handleMove(event);
@@ -151,7 +154,7 @@ bool MoveTool::handleRelease(QMouseEvent *event) {
         c.applyMoveDrag(event->position(), event->modifiers());
     }
     c.finishDrag();
-    if (click) {
+    if (selectOnClick) {
         c.selectAtScreenPoint(event->position(), event->modifiers());
     }
     c.refreshHover(event->position(), event->modifiers());

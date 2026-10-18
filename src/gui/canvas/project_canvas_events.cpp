@@ -26,7 +26,9 @@ void ProjectCanvas::refreshHover(const QPointF &point, Qt::KeyboardModifiers mod
         && !(tool_ == QStringLiteral("move") && options_.moveToolAutoSelect)) {
         return;
     }
-    const QString id = selectTargetAtScreenPoint(point, modifiers);
+    const bool preservesSelection = tool_ == QStringLiteral("move") && options_.moveToolAutoSelect
+        && boxContainsScreenPoint(currentSelectionBox(), point);
+    const QString id = preservesSelection ? QString() : selectTargetAtScreenPoint(point, modifiers);
     if (id == hoverLayerId_) {
         return;
     }

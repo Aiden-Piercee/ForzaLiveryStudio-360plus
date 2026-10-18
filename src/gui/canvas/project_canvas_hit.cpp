@@ -239,6 +239,9 @@ bool ProjectCanvas::prepareMoveAutoSelection(Qt::KeyboardModifiers modifiers) {
     if (state_ == nullptr) {
         return false;
     }
+    if (boxContainsScreenPoint(drag_.startBox, drag_.startScreen)) {
+        return true;
+    }
     const QVector<QString> hits = layersAtScreenPoint(drag_.startScreen);
     const QString guideTarget = hits.isEmpty() ? guideAtScreenPoint(drag_.startScreen) : QString();
     const QSet<QString> selected = state_->selectedLayerIds();

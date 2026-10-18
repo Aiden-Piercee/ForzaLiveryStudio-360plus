@@ -40,8 +40,9 @@ exports grouped `C_group` folders and `C_livery` folders.
   selected group climb one parent at a time and stop at the outermost group.
   Rapid clicks follow the same sequence. Move with **Options → Move Tool Auto-Select** enabled
   uses the same click selection and hover outlines, and shows the Select cursor
-  when the selection is empty. Starting on empty space clears the selection.
-  Dragging a selected shape keeps the current selection together. With auto-select
+  when the selection is empty. The current selection takes priority within its
+  bounding box for clicks and drag starts. Outside the box, shapes and groups can
+  be selected and empty space clears the selection. With auto-select
   disabled, Move can drag the current selection from anywhere on the canvas.
   Pipette can return to the previously used tool after a successful
   pick through a persistent, default-on Options toggle.
@@ -547,10 +548,10 @@ exports grouped `C_group` folders and `C_livery` folders.
   Conversion precedes the guide transform and is independent of viewport zoom,
   color tolerance, and fill margin. Completing a Bucket-derived fill retains
   the guide-layer selection.
-- Use Move tool auto-select from the Options menu to select clicked layer groups.
-  **Allow Move Outside Bounding Box** is on by default, letting Move and Transform
-  drag the current selection from outside its bounds and giving that selection
-  priority over auto-select. Disable it to retain bounds-gated interaction.
+- Use Move tool auto-select from the Options menu to select shapes and groups
+  outside the current selection box. Inside the box, clicks keep the selection
+  and drags move it. With auto-select disabled, Move can drag the selection
+  from anywhere on the canvas.
 - Keep a selected contour-leeway group's world geometry cached while panning and
   zooming the canvas. Scene edits invalidate the cached overlay.
 - Holding Space on the canvas shows an open hand cursor; panning shows a closed

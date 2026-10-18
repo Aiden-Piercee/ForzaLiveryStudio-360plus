@@ -8,6 +8,7 @@
 #include "cgroup_codec.h"
 #include "vinyl_decoder.h"
 #include "project_canvas.h"
+#include "canvas_camera.h"
 
 #include <limits>
 
@@ -585,6 +586,109 @@ void liveryMoves(Harness &h) {
     QApplication::setActiveWindow(nullptr);
 }
 
+void moveAutoSelection(Harness &h) {
+    gui::ProjectCanvas *canvas = nullptr;
+    for (QWidget *widget : h.window.findChildren<QWidget *>()) {
+        if (auto *found = dynamic_cast<gui::ProjectCanvas *>(widget)) canvas = found;
+    }
+    require(canvas != nullptr, "canvas is missing");
+    canvas->resize(1000, 600);
+    const auto reset = [&]() {
+        fls::Project project;
+        fls::scene::ensureProjectSceneRoot(project);
+        const auto make = [](const QString &id, double x, double y = 0.0) {
+            auto node = shape(id, x);
+            node->transform = {x, y, 0.25, 0.25, 0, 0};
+            return node;
+        };
+        auto group = std::make_unique<fls::scene::Group>();
+        group->id = "selection";
+        group->append(make("left", -200));
+        group->append(make("right", 200));
+        project.root->append(std::move(group));
+        project.root->append(make("overlap", 0));
+        project.root->append(make("foreground", -200));
+        auto outside = std::make_unique<fls::scene::Group>();
+        outside->id = "outside-group";
+        outside->append(make("outside-a", 800));
+        outside->append(make("outside-b", 800, 100));
+        project.root->append(std::move(outside));
+        h.reset(std::move(project));
+        canvas->setTool("move");
+        canvas->setMoveToolAutoSelect(true);
+        canvas->setTransformRelativeMode(false);
+        h.select({"selection"});
+    };
+    reset();
+    gui::BoundsAccumulator bounds;
+    const QRectF ink = canvas->shapeInkBounds(101);
+    require(ink.isValid(), "Move selection test needs square geometry");
+    for (const auto *node : gui::sceneShapeLeaves(*h.state->project()->root))
+        bounds.add(gui::sceneWorldTransform(*node), ink);
+    gui::CanvasCamera camera;
+    camera.setViewBounds(bounds.bounds());
+    constexpr double kRulerExtent = 28;
+    camera.recompute(QPointF(kRulerExtent, kRulerExtent), canvas->width() - kRulerExtent, canvas->height() - kRulerExtent);
+    const auto screen = [&](const QPointF &world) { return camera.worldToScreen(world); };
+    for (auto modifiers : {Qt::KeyboardModifiers(), Qt::KeyboardModifiers(Qt::ShiftModifier), Qt::KeyboardModifiers(Qt::ControlModifier)}) {
+        for (const QPointF point : {QPointF(), QPointF(-200, 0), QPointF(100, 0)}) {
+            click(canvas, screen(point).toPoint(), modifiers);
+            require(h.state->selectionEntries() == QVector<QString>{"selection"}
+                    && h.state->selectedLayerIds() == QSet<QString>{"left", "right"},
+                    "Move click inside the selection box changed the selection");
+        }
+    }
+    for (const QPointF origin : {QPointF(), QPointF(100, 0)}) {
+        reset();
+        const QTransform before = gui::sceneWorldTransform(*h.state->sceneNode("selection"));
+        const QTransform other = gui::sceneWorldTransform(*h.state->sceneNode("overlap"));
+        const QPointF start = screen(origin), end = screen(origin + QPointF(30, 15));
+        QMouseEvent press(QEvent::MouseButtonPress, start, canvas->mapToGlobal(start.toPoint()), Qt::LeftButton, Qt::LeftButton, {});
+        QApplication::sendEvent(canvas, &press);
+        require(h.state->selectionEntries() == QVector<QString>{"selection"}, "Move press in a gap cleared the selection");
+        QMouseEvent move(QEvent::MouseMove, end, canvas->mapToGlobal(end.toPoint()), Qt::NoButton, Qt::LeftButton, {});
+        QApplication::sendEvent(canvas, &move);
+        QMouseEvent release(QEvent::MouseButtonRelease, end, canvas->mapToGlobal(end.toPoint()), Qt::LeftButton, Qt::NoButton, {});
+        QApplication::sendEvent(canvas, &release);
+        require(h.state->selectionEntries() == QVector<QString>{"selection"}, "Move drag inside the box reselected another shape");
+        sameWorld(before * QTransform::fromTranslate(30, 15), gui::sceneWorldTransform(*h.state->sceneNode("selection")), "Move protected selection drag");
+        sameWorld(other, gui::sceneWorldTransform(*h.state->sceneNode("overlap")), "unselected overlap");
+        require(h.state->undoStack_.size() == 1, "protected Move drag did not create one undo step");
+        h.trigger("undo");
+        sameWorld(before, gui::sceneWorldTransform(*h.state->sceneNode("selection")), "Move protected selection undo");
+    }
+    reset();
+    click(canvas, screen(QPointF(800, 0)).toPoint());
+    require(h.state->selectedLayerIds() == QSet<QString>{"outside-a"}, "Move did not select a shape outside the box");
+    reset();
+    click(canvas, screen(QPointF(800, 0)).toPoint(), Qt::ShiftModifier);
+    require(h.state->selectionEntries() == QVector<QString>{"outside-group"}, "Move Shift-click did not select an outside group");
+    reset();
+    click(canvas, screen(QPointF(500, 0)).toPoint());
+    require(h.state->selectedLayerIds().isEmpty(), "empty click outside the box did not deselect");
+    reset();
+    h.select({});
+    click(canvas, screen(QPointF()).toPoint());
+    require(h.state->selectedLayerIds() == QSet<QString>{"overlap"}, "Move without a selection failed to auto-select");
+    reset();
+    gui::EditorCommand rotate;
+    rotate.type = gui::EditorCommandType::LocalTransforms;
+    rotate.entries = {"selection", "overlap"};
+    auto groupFrame = h.state->sceneNode("selection")->transform;
+    groupFrame.rotation = 45;
+    auto overlapFrame = h.state->sceneNode("overlap")->transform;
+    overlapFrame.x = 100;
+    rotate.transforms.insert("selection", groupFrame);
+    rotate.transforms.insert("overlap", overlapFrame);
+    require(h.state->executeCommand(rotate), "rotated selection fixture failed");
+    canvas->setTransformRelativeMode(true);
+    click(canvas, screen(QPointF()).toPoint());
+    require(h.state->selectionEntries() == QVector<QString>{"selection"}, "rotated selection box did not protect its interior");
+    click(canvas, screen(QPointF(100, 0)).toPoint());
+    require(h.state->selectedLayerIds() == QSet<QString>{"overlap"}, "Move protected space outside the rotated selection box");
+    h.validate();
+}
+
 void actions(Harness &h) {
     const QStringList expected{"undo", "redo", "copy", "cut", "paste", "group_ungroup", "ungroup_flat",
         "fold_all_groups", "delete_selected", "stamp", "flip_selection", "center_view_on_selection",
@@ -666,6 +770,7 @@ int main(int argc, char **argv) {
         rejectedMoves(harness);
         actions(harness);
         liveryMoves(harness);
+        moveAutoSelection(harness);
     } catch (const std::exception &error) {
         QTextStream(stderr) << error.what() << '\n';
         return 1;
