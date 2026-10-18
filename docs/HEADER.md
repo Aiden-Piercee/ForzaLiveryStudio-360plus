@@ -1,84 +1,107 @@
-# Forza Horizon Header Format
+# Forza header sidecar format
 
-The `header` sidecar stores project metadata separately from `C_group` and
-`C_livery`. The editor decodes the fields required by the project UI and retains
-opaque bytes for round-trip output.
+The `header` sidecar stores metadata separately from `C_group` and `C_livery`.
+Horizon and Motorsport use the shared prefix below with version-specific tails.
+The editor decodes UI fields and retains opaque source bytes for round trips.
 
-## Common Preamble
+## Shared prefix
+
+All numeric fields are little-endian. Text lengths count UTF-16 code units.
 
 ```text
 u32       format version
-u32       name length in UTF-16 code units
+u32       name length
 byte[]    name in UTF-16LE
-u32       description length or zero
-```
-
-A zero description length selects the draft layout. A nonzero length is followed
-by a UTF-16LE description and the published metadata fields.
-
-## Draft Layout
-
-The common date and creator fields follow the description field in both draft
-and published headers. The following tail diagram describes versions 4, 6, 7,
-and 9; the older layouts are described separately below:
-
-```text
+u32       description length
+byte[]    description in UTF-16LE
 u16       year
 u8        month
 u8        day
 byte[16]  metadata field block
 byte[8]   creator identity tag
-u32       creator-name length in UTF-16 code units
+u32       creator-name length
 byte[]    creator name in UTF-16LE
-byte[28]  section prefix
-byte[2]   section marker
-byte[]    section padding
-u32?      category
-u32       type value
-u32?      target car identifier
-byte[16]  asset GUID
-byte[]    trailing data
 ```
 
-FH2, FM5, and FM6 use version 0; FH3 uses version 1. After the creator name,
-these headers contain a sixteen-byte prefix, a version-sized padding field,
-the decal total, an optional livery car identifier, and an eight-byte asset
-identifier. The asset type in the metadata field block determines whether the
-car identifier is present. Remaining bytes are retained as trailing metadata.
+A zero description length selects the draft layout and contributes no description
+bytes. Published headers carry a non-empty description; their date and creator
+fields follow the same layout. The metadata field block supplies the asset type
+used to determine optional livery car fields.
 
-FM7 uses version 2 with a twenty-eight-byte prefix and a one-byte `01` marker
-before the decal total. Its asset identifier is sixteen bytes.
-FH4 uses version 4. FH5 imports contain versions 4 and 6; the exporter selects
-version 6. Both layouts use a five-byte marker-and-padding block. Their car
-identifier is optional; the asset type in the metadata field
-block selects it for liveries and omits it for groups. FH6 uses version 7 and a
-nine-byte marker-and-padding block. Motorsport 2023 uses version 9, a nine-byte
-marker-and-padding block, and a category preceding the type value. Its car
-identifier follows the type value.
+## Versioned tails
 
-The metadata field block, creator identity tag, section prefix, marker padding, GUID, and trailing
-data are preserved by the editor. Livery export synchronizes the target car
-identifier and decal total with the embedded container metadata.
-Trailing metadata has variable length and can contain repeated identity and
-count fields. Its presence and length do not determine the core header layout.
+The tail begins immediately after the creator name. Versions 2 and later use:
 
-## Published Layout
+```text
+byte[28]  section prefix
+byte[]    section marker and padding
+u32?      category
+u32       type value / logical decal count
+u32?      target car identifier
+byte[16]  asset GUID
+byte[]    opaque trailing metadata
+```
 
-Published headers use the same metadata fields after a non-empty description.
-Their section prefix can contain state and repeated identity data and is retained
-unchanged.
+| Version | Games | Prefix bytes | Marker + padding bytes | Asset ID bytes | Car identifier |
+| --- | --- | --- | --- | --- | --- |
+| 0 | FH2, FM5, FM6 | 16 | 0 | 8 | Livery asset type. |
+| 1 | FH3 | 16 | 1 | 8 | Livery asset type. |
+| 2 | FM7 | 28 | 1 | 16 | Livery asset type. |
+| 4 | FH4; accepted FH5 imports | 28 | 5 | 16 | Livery asset type. |
+| 6 | FH5 export | 28 | 5 | 16 | Livery asset type. |
+| 7 | FH6 | 28 | 9 | 16 | Present. |
+| 9 | Motorsport 2023 | 28 | 9 | 16 | Present. |
 
-## Codec Behavior
+Versions 0 and 1 replace the generic section prefix with sixteen bytes and use
+a padding field whose size equals the version. The decal total follows that
+padding, then the optional livery car identifier and eight-byte asset identifier.
+Version 2 uses a single `01` marker. Versions 4 and 6 use a two-byte marker plus
+three padding bytes; versions 7 and 9 use a two-byte marker plus seven bytes.
+Version 9 inserts the category before the decal count.
 
-`parseHeader()` validates string and fixed-field bounds before returning
-`HeaderMetadata`. `buildHeader()` writes the corresponding draft or published
-layout. A new draft receives format version 7, the current date fields, a new
-GUID, and initialized opaque blocks.
+Opaque blocks, creator identity, marker padding, GUIDs, and trailing metadata
+remain attached to the project. Published section prefixes can contain state and
+repeated identity fields. Trailing bytes can contain repeated identity and count
+fields; the core layout is selected by version and asset type.
 
-Imported header bytes remain attached to the project. Group export converts
-published metadata to a draft header, clears the description, synchronizes the
-decal total, and uses the destination save-profile identity before writing the
-output folder. Native target export selects the destination layout, normalizes
-publication metadata, and retains compatible identity fields. Opaque fields
-without a compatible destination representation receive the target defaults.
-Projects without an imported header receive a generated draft header.
+## Motorsport 2023 tail
+
+Version 9 uses the shared prefix above. Its livery tail expands to:
+
+```text
+byte[12]  state and reserved prefix
+byte[16]  asset GUID
+byte[2]   marker
+byte[7]   padding and state
+u32       category
+u32       logical decal count
+u32       target car identifier
+byte[16]  repeated asset GUID
+byte[]    opaque trailing metadata
+```
+
+The fixed tail through the repeated GUID is 65 bytes. The first twenty-eight
+bytes form the generic section prefix. Both prefix and marker padding carry
+state and are preserved as opaque metadata.
+
+The import browser reads shared metadata when decodable and retains the original
+header bytes. Livery target information comes from the livery stream. Import
+preserves this tail as source metadata without regenerating the header.
+
+## Codec behavior
+
+`parseHeader()` validates string and fixed-field bounds into `HeaderMetadata`.
+`buildHeader()` writes the matching draft or published layout.
+`defaultDraftHeader()` initializes version 7, the current date, a new GUID, and
+opaque blocks.
+
+Group export normalizes publication metadata to a draft header, clears the
+description, synchronizes decal totals, and applies the destination save-profile
+identity. Livery export synchronizes the target car and decal count with the
+container. Native target export selects the destination layout and retains
+compatible identity fields; opaque data without a destination representation
+receives target defaults. Projects without source headers receive generated
+draft metadata.
+
+See [group encoding](CGROUP.md), [livery export profiles](CLIVERY.md#native-export-targets),
+and [WGS replacement](WGS.md) for the enclosing asset formats.

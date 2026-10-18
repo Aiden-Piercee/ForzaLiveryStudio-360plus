@@ -1,221 +1,124 @@
-# Compact Fit shape configuration
+# Compact Fit and Lining shape configuration
 
-Compact Fit reads `assets/compact_fit_shapes.json` beside the executable at the
-start of each operation. Changes take effect on the next operation without a
-rebuild or restart. An operation keeps its initial configuration snapshot.
-If the deployed file is absent, the loader checks `assets/compact_fit_shapes.json`
-under the current working directory. An invalid deployed file produces an error
-and does not fall back to another configuration.
+Shape catalogs select the native silhouettes available to fitting operations.
+Compact Fit uses `assets/compact_fit_shapes.json`; Lining and the closed
+thin-region API use `assets/lining_shapes.json`. Engine behavior and API quality
+options are documented in [FILL_ENGINES.md](FILL_ENGINES.md).
 
-The repository file supplies deployment defaults. To apply repository edits
-without compiling, run `tools/update_compact_fit_config.ps1`. It copies only this
-JSON file to `build/Release/assets`. Alternatively, edit the deployed file
-directly. A later application build redeploys the repository defaults.
+## Deployment
 
-The experimental `assets/compact_fit_shapes_combined.json` profile combines
-the task additions from the comparison tool. Activate it with
-`tools/update_compact_fit_config.ps1 -ConfigurationPath assets/compact_fit_shapes_combined.json`.
-Run the helper without `-ConfigurationPath` to restore the default profile.
+Each operation loads a configuration snapshot from `assets/` beside the
+executable. When that file is absent, the loader checks `assets/` under the
+current working directory. An invalid deployed file reports an error. Edits take
+effect on the next operation without restarting or rebuilding.
 
-The default curve task includes Pill `2133`. Its smooth ends participate in the
-same affine profile fitting and exact coverage checks as the other silhouettes.
+A build deploys repository defaults. To copy only the Compact Fit configuration
+into an existing `build/Release/assets` directory, run:
 
-## Catalog fields
+```powershell
+.\tools\update_compact_fit_config.ps1
+```
 
-- `schema_version`: must be `1`.
-- `shape_ids`: enabled opaque native silhouettes.
-- `reserve_shape_ids`: additional enabled silhouettes, disjoint from `shape_ids`.
-  The legacy comparison solver retains its reserve-search behavior. Compact Fit
-  task membership controls eligibility for both lists.
-- `tasks`: must contain every task below. An empty task array disables that
-  task's new shape proposals.
+`-AssetsDirectory` selects a different deployed asset directory.
+`-ConfigurationPath` selects an alternate source file. The repository includes
+`assets/compact_fit_shapes_combined.json` for experimental task additions.
+Running the helper without `-ConfigurationPath` restores the default catalog.
+Edit deployed `lining_shapes.json` directly to try Lining catalog changes;
+a later build redeploys the repository version.
 
-The global catalog limits every task. Removing an ID from both catalog lists
-disables that shape even if a task array still mentions it. Geometry must already
-exist in the native shape library. This configuration selects existing shapes;
-it does not define new geometry.
+## Catalog schema
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | Required; must be `1`. |
+| `shape_ids` | Enabled opaque native silhouettes. |
+| `reserve_shape_ids` | Additional enabled silhouettes, disjoint from `shape_ids`. |
+| `tasks` | Required task selections listed below. |
+| `stroke_shape_ids` | Preferred stroke silhouettes for Lining. |
+| `centerlines` | Normalized centerline definitions for Lining silhouettes. |
+
+The combined shape lists bound every task. Removing an ID from both lists
+disables it globally. Geometry must exist in the deployed native shape library
+and supply opaque painted area. Catalog configuration selects existing geometry.
+The reserve list retains its separate search role in the legacy comparison
+solver; general Compact Fit uses task membership for eligibility.
+
+IDs must be integers and unique within each list. Unknown fields, unavailable
+geometry, overlapping catalog lists, and missing task selections produce errors.
+Logs identify the loaded path, SHA-256 hash, and effective task membership.
 
 ## Tasks
 
-| Key | Shape selection |
-| --- | --- |
-| `curves` | Catalog perimeter profiles used to initialize curved spans. |
-| `interior` | Interior and thin-body seed proposals. |
-| `corners` | Affine corner proposals. |
-| `straight_edges` | Rectangle span proposals; accepts Square `101` or `[]`. |
-| `corner_triangles` | Endpoint triangle proposals; accepts Triangle `103` or `[]`. |
-| `replacements` | General CPU count-reduction searches. |
-| `cutout_replacements` | Additional CPU replacements when the target has holes. |
-| `group_replacements` | GPU pair replacements and exact boundary-cluster replacements. |
-| `whole_region` | Single-placement recognition candidates. |
-| `gap_patches` | Bounded interior gap patches. |
-| `residual_repair` | Residual repair replacements, insertions, and connectors. |
-| `patch_consolidation` | Rounded patch consolidation; accepts Circle `102` or `[]`. |
-| `exact_replacements` | Exact rectangle consolidation; accepts Square `101` or `[]`. |
+Every task key is required. A value is an array of eligible IDs or a selector
+object. An empty array disables new proposals for that task.
 
-Task arrays list eligible IDs. Interior, corner, and gap-patch proposals retain
-array order. Other searches retain their geometric rankings and deterministic
-tie breaks. A task controls new catalog choices. Refinement can still move or
-grow existing placements, and exact deletions can remove redundant placements.
-Task changes can alter runtime, count, and quality because proposals share a
-bounded evaluation budget. Coverage and quality checks remain active.
+| Key | Role | Restricted selection |
+| --- | --- | --- |
+| `curves` | Perimeter profiles for curved-span initialization. | |
+| `interior` | Interior and thin-body seeds. | |
+| `corners` | Affine proposals anchored to silhouette corners. | |
+| `straight_edges` | Rectangle span proposals. | Square `101` or `[]`. |
+| `corner_triangles` | Endpoint triangle proposals. | Triangle `103` or `[]`. |
+| `replacements` | General CPU count reduction. | |
+| `cutout_replacements` | Additional replacements for regions with holes. | |
+| `group_replacements` | GPU pair and boundary-cluster replacements. | |
+| `whole_region` | Single-placement recognition. | |
+| `gap_patches` | Bounded interior gap patches. | |
+| `residual_repair` | Residual replacements, insertions, and connectors. | |
+| `patch_consolidation` | Rounded patch consolidation. | Circle `102` or `[]`. |
+| `exact_replacements` | Exact rectangle consolidation. | Square `101` or `[]`. |
 
-Boundary-cluster compaction reuses eligible candidates from the seed pool.
-New cluster fits use shapes selected by both `curves` and `group_replacements`.
-The fit follows the principal direction of the required support and tightens
-its transverse scale against the permitted envelope. Exact union checks
-preserve interior coverage and reject contour-quality regressions.
+Selector objects accept these optional fields:
 
-The corner fitter derives anchors from usable silhouette corners. Adding a
-shape to `corners` enables those proposals. Straight-edge proposals currently
-derive their transform from a rectangle side and its inward normal. Other
-silhouettes require a fitter that identifies suitable straight sides and their
-interior orientation before they can participate in `straight_edges`.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `all` | Boolean | Include every enabled catalog shape. |
+| `multiple_contours` | Boolean | Include enabled shapes with multiple contours. |
+| `exclude` | ID array | Remove IDs from this task after inclusion. |
 
-A task can instead use an object with these optional fields:
+Inclusion flags combine; exclusions apply last. Selectors follow catalog order.
+Explicit arrays preserve proposal order for interior, corner, and gap-patch
+searches; other searches use their geometric rankings and deterministic ties.
+Restricted tasks validate the resulting selection against the required shape ID.
 
-- `all`: includes every enabled catalog shape.
-- `multiple_contours`: includes enabled silhouettes with more than one contour.
-- `exclude`: removes these IDs from that task only.
+Tasks control new catalog proposals. Refinement can move or grow retained
+placements and delete redundant ones. New boundary-cluster profile fits use the
+intersection of `curves` and `group_replacements`. Catalog changes affect count,
+quality, and runtime through a shared bounded search budget.
 
-`all` and `multiple_contours` combine by inclusion. Exclusions are applied last.
-Selector results follow catalog ID order. All flags must be booleans. IDs must
-be integers, unique within each list, and present in the native geometry library.
-Unknown fields and missing tasks produce an error.
+## Lining catalog
 
-Logs include the loaded file path, its SHA-256 hash, and effective task lists.
-These identify the configuration snapshot used for a fit.
+Lining uses the same schema, deployment lookup, and validation rules. Its catalog
+also requires explicit `centerlines` for every enabled silhouette. Keys are shape
+IDs and values are arrays of `[x, y]` pairs normalized to painted bounds.
+Coordinates must be finite and within `[0, 1]`, with at least two points and
+distinct endpoints. `stroke_shape_ids` selects preferred strokes from the enabled
+catalog.
 
-## Thin regions and Lining
-
-The Lining tool and the headless thin-region API read
-`assets/lining_shapes.json` beside the executable on each operation. The same
-schema and validation rules apply. Edit `build/Release/assets/lining_shapes.json`
-to try changes without rebuilding or restarting. A build redeploys the
-repository defaults. If the deployed file is absent, the loader checks the
-current working directory; an invalid deployed file produces an error.
-
-Open Lining paths use a continuous stroke objective. Each anchor supplies a
-width, interpolated along its cubic segment. The toolbar sets uniform width;
-blue width handles change individual anchors. Every enabled shape has an
-explicit polyline in `centerlines`, expressed as `[x,y]` pairs normalized to
-its painted bounds. Missing definitions block loading the Lining catalog.
-`tools/generate_lining_centerlines.py` rebuilds these definitions from the
-opaque mesh's connected triangle strip. Definitions can also be edited directly.
-`stroke_shape_ids` selects preferred native stroke silhouettes from the enabled
-catalog. Generic primitives remain available for a failed stroke plan.
-
-Each hard point ends an authored span. The search first tries one preferred
-stroke over the complete span, then subdivides when a single fit cannot meet
-the curve and width constraints. Count reduction stays within these spans.
-The initial search matches only the stored centerlines. Full and
-trimmed centerline profiles propose affine placements in both directions.
-Silhouette boundaries supply no initial matching profiles. Bounded pose
-optimization then adjusts the placements against the width profile and stroke
-envelope. Neighboring spans can merge while preserving the same quality limits.
-The assembled union receives a contour optimization pass that measures tangent
-and turning errors against the requested ribbon. Translation, rotation, scale
-and shear compete while preserving trace support and centerline accuracy.
-Continuity and curve accuracy take priority over shape count, then area
-coverage. Cross-sections measure width error against the anchor profile while
-allowing natural native taper. Average sampled body width must reach 40% of
-the requested width; width error also influences candidate ranking. Interior
-width probes retain at least 65% where the authored width varies. The permitted
-outer width is 130%. Verification requires a connected emitted
-stroke that follows the centerline within its curve allowance. Sampled profile
-deviation is bounded by 8% of local width; endpoint tangent error is limited to
-five degrees. Ribbon coverage is measured separately. Open paths use the shape
-and profile trial and time budgets; the area coverage and growth settings below apply
-to the closed-region API.
-
-The closed-region backend first tries one Square for a straight span and the
-`whole_region` shapes for a complete region. If one placement cannot cover the
-region within the margin, a bounded profile search uses `curves`, `corners`,
-`straight_edges`, `corner_triangles` and `interior`. The default catalog enables
-native shapes, including triangles. Triangle proposals follow contour corners
-and spans; the backend does not construct a triangle mesh. Whole-region matching uses
-affine hull anchors as well as bounding boxes, so rotation and heavy skew do
-not require a preferred shape ID.
-
-The overlap envelope follows local stroke width. The quality preset limits
-thickness to 2 times the original, with the supplied outward margin as an additional
-absolute cap. The API permits thickness ratios above 1 and at most 2. Tapered
-tips receive a small geometric tolerance. Closed regions estimate width from
-inward boundary crossings. Candidate
-selection penalizes extra ink while favoring placements that cover long spans.
-Medial paths and partial source profiles support matching across junctions.
-Candidate paths also connect compatible tangent directions through junctions.
-Stable noncollinear anchors support inflected curves. Growth uses cached local
-geometry, and gap repair keeps original cutout edges distinct from new holes.
-The quality search also recognizes affine native arcs in polygon contours.
-Recognized shapes must fit the original painted geometry. When they cover most
-of the region, selection retains these strokes before filling the residual.
-A native cover with at least 99.5% area coverage and 99.9% interior coverage
-skips the broad profile search. Selection checks these thresholds again before
-skipping residual body proposals and the expensive pose refinement. Growth,
-gap repair, cleanup, native replacements, merging and final checks still run.
-Curve screening uses
-a raster resolution based on stroke width, and quality profile fits allow more
-numerical iterations and trimmed ends.
-Preferred padding contributes to selection without requiring coverage of all
-padding pixels.
-At least 98% of the selected region must remain covered. Existing placements
-can grow toward a preferred thickness of 1.6 times the original, within the
-same envelope. This is a soft target that preserves coverage and continuity.
-Width growth keeps selected pixels that are already covered intact.
-Placements that add little coverage are removed before and after gap repair
-when protected interior coverage, connectivity and cutouts remain intact in the
-complete union. Quality selection gives additional weight to the stroke interior.
-Small gaps first try expanding a nearby placement. Leeway represents layers above the
-lining: generated shapes can continue underneath, and visible coverage checks
-exclude those areas. Square `101` in
-`gap_patches` enables significant gap proposals, and Square `101` in
-`exact_replacements` enables rectangle consolidation. Shapes in
-`group_replacements` can consolidate neighboring placements through reused
-profile candidates and bounded local affine fits. Quality refinement also adjusts
-neighboring groups through translation, rotation, scale and shear.
-Group membership follows geometric contact and the fraction of overlap.
-Nearby placements can close very small gaps with fine scale adjustments;
-rectangle repair includes the precision of the emitted float transform.
-Separate native regions are matched individually before the profile search. Width growth takes priority
-over length adjustments at joins. The remaining task lists are reserved for
-the general Compact Fit backend. Search budgets, the coverage target and
-geometric tolerances are API options, separate from the shape configuration.
-Default API options use the shorter search, with preferred thickness 1.15 and
-maximum thickness 1.6. `thin::qualityOptions()` supplies the GUI preset:
-2,000,000 profile trials, 120,000 pose evaluations and a 180-second time budget
-for pose refinement. Whole-region fits can finish before these stages. Budget
-exhaustion proceeds to final verification with the accepted placements.
-
-The headless test tool accepts `--lining-tests`, `--thin-tests`, `--thin-quality-tests`,
-`--thin-fit <contour-log>` and
-`--thin-reference <project> [comparison-project]`. Use
-`--thin-reference-quality <project> [comparison-project]` for the quality preset.
-`--thin-reference-quality-seed <project>` stops after candidate selection and
-reports the seed measurements without running the refinement passes.
-`--thin-color-reference-quality <project> [comparison-project]` fits opaque color
-runs separately, treats later opaque runs as leeway, and retains translucent
-source placements and their opacity in the comparison. Reference commands
-report fitting phases as well as final measurements.
-Thin operations use their
-own catalog. The explicit `--shape-config` argument applies to general Compact
-Fit operations.
+`tools/generate_lining_centerlines.py` derives definitions from opaque mesh
+triangle strips. Definitions can also be edited directly. The open-path fitter
+matches these centerlines; the closed-region API uses region and silhouette
+geometry. Their quality limits and search budgets are API settings described in
+[fill engines](FILL_ENGINES.md#lining-and-closed-thin-regions).
 
 ## Compare configurations
 
-The headless `fls_compact_fit_tests` tool accepts `--shape-config` followed by an
-explicit configuration path. This leaves the deployed editor configuration
-unchanged. Build the headless target with `FLS_BUILD_TESTS=ON` before using it.
+Build `fls_compact_fit_tests` with `FLS_BUILD_TESTS=ON`.
+`--shape-config <path>` selects an explicit general Compact Fit catalog for a
+headless run while leaving the deployed editor configuration unchanged.
 
-Run `python tools/compare_compact_fit_configs.py --request <contour-log>` to
-compare the baseline against additions defined in
-`tools/fixtures/compact_fit_shape_trials.json`. Repeat `--request` to compare
-multiple contours. `--variants` selects another task-addition file, `--only`
-selects named variants, and `--allowance` sets one fixed allowance for every fit.
+Run `python tools/compare_compact_fit_configs.py --request <contour-log>` to compare
+the baseline against task additions in `tools/fixtures/compact_fit_shape_trials.json`.
 
-Each variant appends IDs to explicit task arrays and enables missing IDs in the
-global catalog. Generated configurations, raw logs, shape usage counts, and
-JSON/CSV measurements are written to `build/compact_fit_shape_trials`, or the
-directory selected by `--output`. Trials run sequentially. Retained results can
-have quality failures; inspect the recorded error and coverage metrics together
-with count and runtime before choosing a configuration.
+| Argument | Purpose |
+| --- | --- |
+| Repeated `--request` | Compare multiple contour requests. |
+| `--variants` | Select a different task-addition file. |
+| `--only` | Select named variants. |
+| `--allowance` | Use one outward allowance for every fit. |
+| `--output` | Select the result directory; defaults to `build/compact_fit_shape_trials`. |
+
+Trials run sequentially and write generated configurations, raw logs, shape usage,
+and JSON/CSV measurements. Evaluate coverage and recorded quality failures
+alongside count and runtime. Headless replay and thin-region comparison modes
+are listed in [fill diagnostics](FILL_ENGINES.md#diagnostics-and-replay).

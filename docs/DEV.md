@@ -1,1244 +1,217 @@
-# Forza GUI Editor
+# Forza Livery Studio developer guide
 
-Standalone Qt6/C++ editor for Forza vinyl projects. It imports supported game
-assets, edits vector and guide layers, saves editor project containers, and
-exports grouped `C_group` folders and `C_livery` folders.
+Forza Livery Studio is a Qt6/C++20 editor for Forza vinyl groups and liveries.
+It imports game assets, edits a hierarchical scene, saves `.3so` projects, and
+exports native game containers. The OpenGL car preview uses decoded game models,
+materials, and livery masks.
 
-## Functionality
+## Documentation
 
-- Import supported asset folders through one context-aware **Import…** action.
-  Its minimal filesystem browser identifies importable folders, shows available
-  header metadata and thumbnails, routes the selection to the matching decoder,
-  and restores its last folder and filters when reopened. A **Recent folders**
-  dropdown beside the drive selector retains up to 10 distinct visited folders
-  across sessions, ordered by most recent visit. A Microsoft Store WGS
-  save directory is exposed there as a read-only virtual list of its active
-  livery and layer-group assets.
-- Open/save editor projects as a `.3so` container: the editor project JSON
-  wrapped in a gzip stream. The document is the unified scene tree (a recursive
-  `root` of kind-discriminated layer nodes). Packed `.3so` is the only recognized
-  project file; the legacy v1 flat and plain-`.json` documents are no longer
-  loaded. Imported livery paint-material colors, selectors, and finishes are stored
-  as project metadata. Each editor instance writes a locked scratch copy of its current
-  project every minute, including unsaved projects. A clean project replacement or exit
-  removes that instance's copy; abandoned copies are offered for recovery at startup.
-  Configurable autosave is enabled by default and writes only to an associated `.3so`.
-  Document version 4 stores authored visibility independently of the canvas's
-  active livery section. Loading older documents restores shapes hidden by
-  section isolation when their visibility matches that layout.
-- Drag/drop projects (`.3so`), `C_group`/`C_livery` files/folders, and
-  image guide layers from Explorer.
-- Edit layers with Select, Move, Marquee, Transform, Rotate, Pipette, Pen, and Lining
-  canvas tools. Select combines click selection with drag marquee selection by
-  default. **Settings → Tools → Separate Select and Marquee tools** restores the
-  separate tools. Picking follows each shape's body, including holes and raster
-  transparency; marquees select shapes whose bodies intersect the rectangle.
-  **Tool Settings → Pick by bounding box** enables rectangular picking instead.
-  Hover outlines follow the silhouette in the selection tools. **Selected outlines**
-  is on by default and keeps selected silhouettes visible across tools.
-  Shift-click selects a shape's immediate group. Further Shift-clicks within the
-  selected group climb one parent at a time and stop at the outermost group.
-  Rapid clicks follow the same sequence. Move with **Tool Settings → Auto Select** enabled
-  uses the same click selection and hover outlines, and shows the Select cursor
-  when the selection is empty. The current selection takes priority within its
-  bounding box for clicks and drag starts. Outside the box, shapes and groups can
-  be selected and empty space clears the selection. With auto-select
-  disabled, Move can drag the current selection from anywhere on the canvas.
-  Pipette can return to the previously used tool after a successful
-  pick through **Tool Settings → Auto Return**, enabled by default.
-  Pen builds a closed hard/soft cubic compound contour with editable interior cutouts.
-  **Edit → Save Pen or Lining Path as Figure** stores the active path as a layer
-  in the project. Figures retain their tool type, anchors, handles, cutouts,
-  widths and fill color. Selecting a figure in **Layers** activates its tool;
-  edits participate in project undo. **Properties → Color** changes its outline
-  and the color used for generated shapes. Outlines have a contrasting black or
-  white stroke. Each tool's **Tool Settings → Save Path** saves its path on
-  completion and is off by default. New Lining paths use black.
-  **Edit ? New Pen Contour** starts a fresh contour. Saved figures support Copy,
-  Paste, Stamp, grouping and canvas transforms. They show an outline in the editor
-  and are excluded from game exports and native shape counts. Saving a `.3so`
-  preserves figures for later editing, including after a contour fill.
-  Pen fits affine vector primitives along curved boundaries, and prepares an interior
-  boundary before meshing the remaining area.
-  The polygonal core uses deterministic ear clipping and compatible Square merging.
-  Placements are emitted from the boundary inward under a `2 * point count` shape
-  cap, and the result is an ordinary single-colour scene group.
-  Pen's **Tool Settings → Mode** selects **Analytical** or **Compact** and preserves
-  the selected mode between launches. Analytic is the default. Saved Thin Regions
-  preferences load as Compact Fit; removed fill modes use Analytic.
-  Raster Bucket tracing fits curve runs between hard anchors. It first attempts
-  a single cubic and then a bounded pair with one shared soft anchor. Corner
-  handles can follow the fitted curve within the raster uncertainty band;
-  shared soft tangents stay aligned. More complex runs retain extra anchors.
-  Boundary displacement, mask coverage and cutout topology checks control
-  simplification, independently of canvas zoom.
-  Bucket-derived Pen contours use the same selected mode. Saved Catalog Cover
-  preferences load as Compact Fit. Compact Fit uses the shared opaque silhouette
-  dictionary and task selections in `assets/compact_fit_shapes.json`, reloaded
-  before each operation. See [Compact Fit configuration](COMPACT_FIT_CONFIG.md)
-  for task fields and deployment without recompilation. The legacy cover solver is
-  excluded from the editor build and remains only in headless comparison tools.
-  Compact Fit is an experimental curve-first approximation with separate
-  contour-quality checks. Its default initialization fits 25 catalog perimeter families
-  to long boundary spans, including spans across authored control points. A
-  point-to-line affine fit includes endpoint position and tangent constraints.
-  Independent profile fits and arc residuals run in double-precision CUDA batches
-  when available, with bounded parallel CPU fallback. With GPU computation enabled,
-  the post-seed optimizer uses a persistent quarter-unit CUDA occupancy grid. It
-  subtracts and updates one placement in that resident coverage instead of
-  rebuilding all other placements. Trial transforms upload affine matrices and
-  reuse the primitive silhouette. A propagated boundary field adds displacement
-  and normal-direction terms to target, interior, spill, and crack-joining scores.
-  Two balanced passes are followed by an interior-repair pass. GPU
-  exclusive-support pruning tests raster-redundant placements and placements with
-  small unique support. Exact interior checks screen each deletion; a fixed
-  boundary-energy baseline bounds sampling changes throughout the pass. Small seed
-  fragments are expanded only
-  when the exact result stays inside the outer envelope, and new refinement moves
-  cannot create sub-footprint fragments. Remaining small fragments compete in
-  two-placement transactions against fitted catalog replacements. Each accepted
-  transaction reduces count and passes an exact aggregate quality check. Group
-  fits use joint unique support instead of overlapping placement bounds.
-  Final compaction examines at most 24 placements with less than 25 square units
-  of unique support at the default scale. Deletions can transfer required interior
-  support to a nearby placement through centered or anchored affine growth.
-  Boundary support can also seed neighbor growth. Candidate ranking compares
-  tangent error, turning error, and join defects before choosing a reduction.
-  Eight bisection steps tighten each growth proposal. Exact checks preserve
-  interior coverage, the outer envelope, area limits, topology, and the fixed
-  corner and continuity baseline. This pass uses at most 1,536 additional trials
-  within the existing total evaluation budget. Small placements remain when a
-  legal reduction cannot preserve their required support.
-  A bounded cluster pass reuses seed candidates and fits curve templates to
-  aligned groups of unique support. It examines four separated neighborhoods
-  within 768 remaining trials. Candidate replacements can transfer small
-  interior gaps to nearby placements through growth. Exact checks preserve
-  required interior, the outer envelope, topology, protected corners, and
-  maximum turning error. Accepted replacements reduce count and keep boundary
-  energy and combined tangent and turning error from increasing.
-  GPU results also receive an exact contour polish within 512 remaining trials.
-  Sampled tangent and turning errors rank at most eight affected placements.
-  Small rotations and shifts compete under a continuity score that gives tangent
-  alignment extra weight. Required interior support can transfer to the two
-  nearest placements through anchored or centered growth. Each accepted
-  transaction keeps the placement count, preserves the envelope and topology,
-  bounds protected-corner displacement and worst turning error, and lowers
-  both combined continuity cost and boundary energy. Final verification uses
-  the original quality limits. A final neighbor-compaction pass examines up to
-  24 placements with less than 150 square units of unique support. It uses at
-  most 1,536 remaining trials and retains the same exact coverage and quality
-  safeguards. Growth ranking reuses cached observed coverage. Large
-  profile-fit batches use a coarse CUDA geometry shortlist before exact validation;
-  the complete candidate pool receives a device-ranked shortlist before exact
-  witness selection. One exact CPU checkpoint accepts an
-  aggregate improvement or restores the seed. Interior repair runs before this
-  comparison when refinement loses previously complete interior support.
-  Refinement proposals and accepted
-  checkpoints stay inside the exact outer envelope. Raster-redundant deletion
-  also checks the emitted union before removing unique support. CUDA
-  failure restores the CPU optimizer. Candidates are ranked by area,
-  arc error, and endpoint tangent
-  error before parallel geometry validation. Nondominated alternatives compete
-  through alternating coverage, arc-error, tangent-error, and spill rankings.
-  Validation checks up to two extra accepted alternatives per span. Retention
-  permits two different transforms from one family and preserves the existing
-  total candidate limit. Failed candidates allow the next ranked fit to compete.
-  Job order, retention slots, and tie breaks are fixed before each batch is
-  committed. CPU and GPU results need not be bitwise identical.
-  Point containment indexes contour edges by height. Boundary-adjacent probes
-  retain the painter-path containment decision. Exact clipping reuses prepared
-  operands in bounded thread-local caches. CUDA mask initialization indexes edges
-  by raster row and preserves the full traversal's winding calculation. Primitive
-  uploads are reused between transform batches. Corner penalties are evaluated
-  only while a candidate's unpenalized score can improve the selected score.
-  Straight runs seed sheared rectangles; convex corners can seed triangles and
-  curved corner shapes. Straight runs meeting at a convex corner also propose a
-  Triangle fitted directly to their endpoints. These proposals compete with the
-  curved catalog shapes; triangle count has no minimum or quota.
-  Interior proposals use six shape types at separated
-  centers. Cover selection combines interior cells and boundary witnesses,
-  followed by redundant-placement removal and catalog substitution. A priority
-  queue reuses marginal-score upper bounds between selections. It produces the
-  same greedy order and index-based tie breaks as exhaustive rescoring while
-  evaluating fewer unchanged candidates.
-  The selected seed is an approximation. Full-union refinement and verification
-  assess the generated result. The editor inserts available shapes even when
-  these checks fail, with the failure reported as a warning. If refinement
-  errors leave no result, the generated seed remains available for insertion.
-  Its dialog specifies outward support distance in
-  world units per axis, initially 2. The inward allowance is 0.5 world units.
-  The entered outward distance is a hard maximum. Seed planning compares tighter
-  allowances at half the observation scale and at the default outward distance,
-  when they fit below that maximum. Plans reuse candidate coverage masks and add
-  bounded contracted variants. A tighter plan must preserve or improve seed
-  count, coverage, area error, contour measurements, and topology. Exact envelope
-  validation follows probe screening. One selected plan proceeds to refinement;
-  seed comparisons cannot guarantee the best result of separate full searches.
-  Logs record the requested and selected distances, plans, and comparison time.
-  Missing-plus-spill area is limited to 2% of the target. The inward allowance
-  applies to the target boundary corridor. Interior support is checked directly,
-  including gaps smaller than a raster cell or the observation scale. Moves and
-  reductions must preserve that support. A bounded repair pass first tries
-  uniform and axis growth of nearby placements, then fitted Square, Circle, and
-  Pill patches with tight and boundary-scale padding. A repair must supply its
-  selected gap completely. Blocked components leave the other gaps available for
-  repair. Corner and energy guards
-  use a fixed reference with the required interior completed, since an uncovered
-  gap can otherwise provide the nearest boundary to a protected corner. The
-  energy bound includes the permitted corner and peak-turn changes. The guards
-  bound changes in existing corner and continuity failures. Valid energy
-  and turning baselines retain their verification limits. Repair logs include
-  blocked components and the active limits; final quality thresholds remain
-  unchanged. These tests use triangle
-  unions on the 1e-6 grid and reconstructed float transforms.
-  Geometry checks precede complete contour measurements when evaluating repair
-  and replacement proposals. GPU coverage repair reserves at most 1,536 trials
-  within the total score budget, with at most 64 component attempts. Further
-  residual search runs when deep coverage or observed topology still needs repair.
-  Boundary fitting compares tangent direction and local turning at two scales,
-  penalizes isolated kinks, and retains detected sharp corners. Final checks
-  also compare component and hole counts at an observation scale of 1 world
-  unit. Observation-only closing discounts narrow cracks; it changes neither
-  placements nor the geometric support checks. These sampled checks are not a
-  perceptual-equivalence or mathematical smoothness guarantee, and the scale
-  is not automatically calibrated to source-image pixels.
-  Tangent and turning measurements compare the observed output with the target
-  after the same observation operator. The observed target is cached. Protected
-  corner distances still use the original target and raw emitted support.
-  Local substitutions use 28 selected shape types, with multi-contour types
-  added for regions with holes. Whole-region recognition starts from the
-  96-shape curated catalog and filters proposals by affine-invariant convexity.
-  Candidate retention keeps distinct shape types. Refitting after deletion
-  is restricted to nearby placements.
-  Candidate scoring during local refits uses a padded window around the changed
-  placements. Remote boundary samples do not enter that score. Accepted moves
-  still reconstruct and check the complete region, including coverage, cutouts,
-  and protected corners. Windows covering most of the target use global scoring.
-  Logs distinguish local evaluations from complete-region move checks.
-  A final replacement stage follows adjacency along the exposed union boundary,
-  where neighboring contour pieces can have distant centers.
-  Coverage ownership caches each placement's unique support using only
-  overlapping placement bounds. Deletion invalidates overlapping neighbors;
-  other geometry changes rebuild the snapshot. Removal ranking reuses these
-  footprints and retains its evaluation accounting. An empty private footprint
-  permits a fast exact-removal check, but both differences of the complete
-  before/after unions must be empty before boundary measurement is skipped.
-  Group replacement anchors use the group's joint unique support, including
-  its exposed spill, rather than the footprint already hidden by surviving
-  shapes. Group ownership is computed jointly, not by adding individual private
-  footprints. All other reduction and final quality checks remain active.
-  Completed failed group searches can be skipped within an unchanged placement
-  snapshot. Budget-interrupted searches are not cached as complete failures.
-  Logs include ownership cache work, invalidations, exact removals, and
-  ownership-driven merge trials and accepted merges.
-  Initialization retains the geometry and transforms of its existing candidate
-  pool for reuse during compaction. Each merge group screens up to 48 candidates
-  from a bounds-ranked shortlist, then tests up to four single replacements
-  and up to eight complementary partners per first choice. Two-candidate
-  replacements require at least three removed placements. These trials share
-  the existing stage budget and precede fresh fitting. Cached footprints only
-  guide selection; accepted trials reconstruct emitted transforms and verify
-  the complete union. The pool is temporary working data, not project content.
-  After polishing, an exact-union pass removes redundant placements and tests
-  many-to-one replacements without a quality allowance. It reuses catalog
-  candidates and adds rectangle envelopes in world and placement coordinates.
-  A replacement must remain inside the polished union and supply the selected
-  group's joint private support. Both differences of the reconstructed complete
-  unions must be empty before committing. The pass preserves existing holes,
-  spill, missing areas, and contour positions on the clipping grid; it cannot
-  repair an existing defect. It does not change the earlier fitting search.
-  Bounds ranking prioritizes potential count savings with stable tie breaks.
-  The pass checks at most 512 candidate containments and 64 contained candidates;
-  these are separate geometric operations after the score-evaluation budget,
-  not additional fitting evaluations. Timing and counts are recorded under
-  `exactReduction` and `exactFinalReduction`. Runtime is not guaranteed to stay
-  unchanged, and an irreducible union may retain its original placement count.
-  Candidate generation plans spans around every boundary before assigning work.
-  Its profile budget grows from 160,000 to at most 640,000 trials, divided across
-  the planned spans. Retention capacity is also divided across the remaining
-  spans. Proposal lengths and structural depths scale with region extent;
-  fitting tolerances and the observation scale remain in world units.
-  Straight and corner searches have separate caps. Interior seeding uses 24
-  centers normally. Regions with low area relative to perimeter use up to 200
-  clearance-spaced centers and elongated catalog proposals aligned to nearby
-  boundary tangents. A bounded occupancy grid screens proposals; emitted
-  triangle-union geometry remains authoritative. Quality limits are unchanged.
-  Deep missing support triggers coverage-oriented seed selection even when total
-  missing area is small. Existing candidates are reused before refinement.
-  Interior radius searches run in bounded CPU batches, with proposals committed
-  in their planned order.
-  Selection uses the caller's shape limit, which defaults to 3,000; the separate
-  160-placement seed ceiling is removed. A verified incumbent survives the fixed
-  60,000-score refinement budget. Cumulative stage ceilings are 5% for recognition,
-  55% after initial repair, 80% after spatial reduction, 90% after exposed-boundary
-  reduction, and 100% after polishing. Unused work carries forward. Nested score
-  evaluations obey the active stage ceiling.
-  Individual refit passes divide their work across placements and refinement
-  scales so coarse moves or early placements cannot consume the entire pass.
-  Half of each pass's allocation is shared uniformly and half follows unresolved
-  protected-corner error at the exposed boundary. Stable priority ordering gives
-  those placements more adjustment work without increasing the total budget.
-  Recognition tries moment-aligned catalog fits before distributing orientation
-  trials across the catalog.
-  Initial repair reserves half its remaining evaluations for placement refits
-  and the rest for residual-driven insertion. Refits cannot introduce new deep
-  missing support or new observed hole defects, or worsen protected corners
-  beyond their current error or the configured allowance. Shallow boundary
-  adjustments remain possible within the inward tolerance. Temporary area-error
-  increases can occur during refits. Each accepted move can update a feasible
-  checkpoint, constrained by the refit's starting coverage and area allowance.
-  The best feasible checkpoint survives an infeasible endpoint; a separate
-  verified incumbent remains available.
-  Residual search includes deep-missing regions, observed unintended holes,
-  and observed interior cracks. Excess observed components also enable shallow
-  boundary-gap tasks. Gaps removed by the observation operator do not create
-  shallow repair tasks. Search finds interior
-  anchors with bounded deterministic subdivision, and clusters nearby gaps using
-  the extent of neighboring placements. Catalog shapes can overlap existing
-  support and use the configured outward corridor, including explicit leeway.
-  Oriented bridge proposals reach the nearest existing support. A body patch
-  can include a separately validated thin Square connector. Before insertion,
-  bounded neighbor trials use up to a third of each residual's trial allocation.
-  They test native-axis growth and translation, scale, rotation, and shear moves
-  of one placement, then independent pairs from retained alternatives. Affine
-  moves use a sampled boundary anchor when available. Each transaction must
-  recover at least half the residual cluster, reduce total
-  missing area, and pass complete-region coverage, topology, area, and boundary
-  energy checks. Accepted neighbor adjustments add no placements. The trials share
-  the existing repair allocation; small shapes remain available when needed.
-  Neighborhood replacement uses a third of the remaining allocation, split
-  between groups of two to four placements and single-neighbor replacements.
-  Group anchors use their joint unique support plus the gap cluster. One broad
-  catalog placement can replace several overlapping patches. The replacement
-  and optional connector are scored as one union. Same-count and count-reducing
-  repairs remain available at the caller's shape limit. Ranking uses residual
-  gain per added placement with a topology bonus, minus a placement cost of
-  four times observation scale squared. Low-benefit insertions are rejected;
-  recovery of deep missing coverage remains eligible. This area-based cost is
-  a count preference, not a contrast-aware perceptual metric. Small placements
-  are not discarded solely because of their footprint. All proposed placements
-  count toward the caller limit and must stay within the permitted envelope.
-  A bounded Circle replacement also tests nearby groups of small placements
-  together after gap repair. It uses remaining repair-stage work and checks the
-  complete union before accepting a lower placement count.
-  Residual transactions retain non-worsening observed component and hole count
-  errors. They cannot increase missing area, create new deep or observed
-  hole defects, or exceed the current area allowance. Final topology
-  verification still applies. Repair obeys the caller's shape budget and
-  shares the existing repair-stage evaluation allowance. Unused insertion work
-  can refit the repaired cover before transfer to compaction. Coverage guards
-  reuse the corner distances already computed by the quality measurement.
-  Independent corner candidates are validated in bounded parallel batches and
-  appended in their original order. Unchanged intermediate placements reuse
-  the previous progress report. Local deletions retain an established exterior
-  envelope; a changed neighbor is checked against that envelope before the
-  complete interior and contour measurements.
-  Exact-union deletions remove redundant placements before spatial compaction;
-  catalog replacements remain in the final exact pass. Boundary-aware refits
-  skip observed-boundary measurements when an upper bound on area and gap score
-  proves that a trial cannot improve the current candidate. Paired boundary
-  moves also cannot increase the error in the number of enclosed holes.
-  Half of the exposed-boundary stage's remaining work tests simultaneous affine
-  moves of adjacent placement pairs before catalog merges. Both pieces move in
-  one scored proposal; neither individual move needs to improve the score.
-  Accepted pair results retain the coverage constraints and area-error bound.
-  Local count reductions can proceed in unverified results if missing and spill
-  area, contour metrics, and topology do not worsen and no new deep-missing area
-  appears. Both the current state and a fixed compaction baseline constrain these
-  edits. Protected corners are compared individually, and observed holes cannot
-  move outside the baseline's hole defects. Verified baselines still require verified replacements. Boundary-aware
-  moves must stay inside the exterior envelope. The status bar combines normalized initialization work
-  with refinement evaluations and reports elapsed time and current shape count.
-  Large placements use bounded initial adjustments and finer refinement levels
-  tied to the inward allowance. Shared seed selection and the single refinement
-  use one combined work allocation. GPU trials remain charged when refinement
-  continues on the CPU. The area, inward-distance, and continuity limits remain
-  unchanged.
-  Work percentage is not a time estimate, and setup and verification cost vary
-  with contour complexity. Quality checks remain active and their failures are
-  recorded; they do not block insertion of available shapes. Cancellation still
-  discards Compact Fit output. Failures before any placements
-  exist leave the contour available for correction and retry.
-  The mode emits opaque shapes and rejects masks. `compact_fit.log` records
-  the replayable request and result, count/error history, shape IDs, elapsed
-  time, work limits, topology, corner displacement, and boundary-quality
-  measurements, together with planned and processed span counts, requested and
-  effective allowances, attempt history, failed verification checks, and whether
-  placements were retained after an error. Headless callers default to strict
-  rejection and can enable `retainFailedFill` to match editor insertion. The older
-  Analytic-seeded optimizer remains available through headless tests; the editor
-  uses curve-first initialization. The isolated-region implementation does not infer future
-  occluders or optimize full-image order.
-  Compact Fit uses bounded caches for unchanged placement unions, reduction
-  measurements, and intended cutout exclusions. Cache keys retain immutable
-  geometry storage; changed placements receive new entries. Integer-grid
-  containment proofs skip full clipping when every subject boundary stays
-  strictly inside the clip and no enclosed clip boundary is filled. Touching
-  boundaries and inconclusive proofs use the regular clipping operation.
-  Clipping against a larger operand caches local projections around the subject.
-  Every edge that can cross that area retains its original integer endpoints;
-  exterior vertices project onto a padded rectangle, preserving interior winding.
-  Square expansion constructs swept segment boundaries directly, with the hull
-  construction retained at small radii and large coordinates. Strictly convex
-  integer contours normalize without a full clipping sweep. Boundary measurements
-  use dense spatial cells, indexed arc lengths, and cached edge lengths.
-  CPU fitting batches retain their worker threads. Independent whole-region
-  recognition proposals evaluate in parallel and apply results and failures in
-  proposal order. Geometry operation timings are available to the headless replay
-  tool through the `FLS_PROFILE_GEOMETRY` environment variable.
-  GPU point tests use explicit loop wraparound and ignore edges that do not
-  cross the sample row. Candidate order, work budgets, and verification limits
-  remain unchanged.
-  Boundary-aware refinement caches the unaffected observed support and the
-  spill-exclusion union. Narrow-gap closing is recomputed within a padded window
-  around each candidate. The window includes the closing operator's full local
-  support and is rebuilt when a candidate leaves it. Integer-grid clipping can
-  slightly change the search score; final verification still measures the full
-  union through the original global closing operation. Work budgets and quality
-  thresholds are unchanged. Logs include per-stage and quality-check timings,
-  stage evaluation allowances and stop reasons, approximate reductions, selection
-  limit exhaustion, coverage-guard rejections, residual insertions, joint moves,
-  shallow repairs, neighborhood replacements, feasible checkpoints and restores,
-  remaining repair area, observed hole-defect area, connector proposal outcomes,
-  clustered gap searches, accepted group replacements, rejected low-benefit insertions,
-  and the profile backend's setup, transfer, numeric, and
-  geometry-validation timings.
-  **Lining** fits an editable open hard/soft centreline with native shapes.
-  Lining (Experimental) is the default fitting mode; Analytical and Compact fill
-  the same stroke outline through their contour engines. Finished paths expose
-  an amber handle at each endpoint. Dragging outward makes the cap convex;
-  dragging inward makes it concave. Double-clicking or right-clicking resets
-  the cap to flat. Cap values persist with the path and participate in undo/redo.
-  Preview and fitting use the same cap geometry.
-  Each anchor has two blue width handles. Dragging a handle or scrolling over
-  it changes that anchor's width; right-clicking it restores the Tool Settings width.
-  The Tool Settings width sets all anchors to a uniform value. Width edits use the
-  path's undo history. Width varies linearly in each cubic segment's parameter,
-  and the preview uses the same width profile as fitting. New anchors retain
-  their local width. Continuity and curve accuracy take priority over shape
-  count, followed by area coverage, while local thickness stays bounded.
-  Each configured native shape has an explicit normalized centerline in
-  `assets/lining_shapes.json`. Backbones pair the silhouette boundaries between
-  stroke ends, with a mesh path fallback for branched geometry. Transparent mesh
-  triangles do not participate in generation. Initial matching uses these
-  centrelines exclusively. A geometric screen retains seeds from each shape for
-  dense curve fitting, including high skew and partial profiles. Width-aware
-  affine fits run alongside pure centreline fits. Cap length can contract or
-  extend within the same curve and guide limits. The fitter checks the
-  full adaptive curve rather than rejecting matches with a coarse sample model.
-  `stroke_shape_ids` prioritizes native strokes for curves. Uniform straight
-  spans prefer line primitives. Each hard point ends an initial span.
-  The fitter attempts one native stroke across the
-  complete span before subdivision. Natural taper is allowed on whole native
-  strokes while sampled width differences guide selection. Average body width
-  retains a 40% lower bound. Subdivision joins retain at least 40% of local width;
-  variable-width subdivision interiors retain at least 65%. Whole native spans
-  are not replaced by plans containing straight fallback pieces during contour
-  repair. Generic fallback requires a section within 4% of local width of a
-  straight chord.
-  **Outside margin** adds space beyond both requested stroke edges, expressed
-  as a percentage of local width. Its default is 50% per edge. Width remains the
-  fitting target; the allowed corridor has width `1 + 2 * margin` times local
-  width. The stored native spine can deviate by 8% of width plus half the margin,
-  with the added allowance capped at 25% of width. Guide coverage keeps its
-  independent 8% distance allowance, using an inscribed circular expansion
-  kernel. Hard endpoint tangents allow twenty degrees; internal subdivision
-  tangents retain five degrees.
-  Exposed contours use Compact Fit's tangent and turning measurements with
-  additional penalties for peak turn and kink count. Authored hard-point
-  neighborhoods within 1.25 local widths retain intentional corners and taper
-  in the curve-interior score. A separate join score includes these neighborhoods
-  and compares their contours with the intended ribbon. Only the path's end caps
-  are excluded from this score. Protected reference corners retain authored turns.
-  Pose adjustments use stroke-width distances for translation, scale, skew and
-  rotation. Adjacent fits can adjust overlap and
-  width together, and neighboring shape alternatives can be replaced atomically.
-  Neighboring spans at a corner can use a single native stroke. Candidate corner
-  fits are compared in the complete union, with exact connectivity and guide
-  checks. Merging, contour repair and pruning preserve joint quality alongside
-  curve smoothness.
-  Final joint cleanup compares distinct native shapes and adjusts each end's
-  length and transverse position independently. It measures turns at boundary
-  vertices in local joint neighborhoods and checks the complete contour with
-  the same sampling mode. Distance checks can extend a fitted
-  backbone toward an authored endpoint by up to half its local width; guide
-  coverage and the fitting corridor still constrain the emitted ink. A terminal
-  protrusion penalty uses the requested ribbon with padding of 12.5% of the
-  minimum stroke width near internal hard points. Cleanup retains exact
-  connectivity and accepts changes that preserve joint roughness and protrusion
-  area while reducing the combined contour cost. Straight spans with varying
-  width retain line alternatives when their local width checks pass.
-  Refinement preserves the current peak turn above the smoothness threshold and
-  can remove observed holes. Contour repair refines candidate subdivisions before
-  comparing their complete unions. Merging and pruning preserve contour quality. Exact
-  connectivity is checked alongside observed contour quality throughout
-  refinement and final verification. The requested ribbon's coverage is recorded
-  separately from continuity and permitted outside area.
-  Failed checks block insertion; cancellation discards placements. The catalog
-  is loaded for each operation. `lining_fill.log` records anchor widths, outside
-  margin, whole-span matching and rejection counts, guide coverage, curve and
-  tangent errors, selected spans, joint quality, contour and joint defect
-  positions, joint cleanup, protrusion area, sampling mode, separate envelope
-  and guide rejection counts, shape usage, contour changes and stage timings.
+| Reference | Contents |
+| --- | --- |
+| [Code style](CODESTYLE.md) | Conventions for new and edited code. |
+| [User manual](MANUAL.md) | Editor workflows and tool controls. |
+| [Fill engines](FILL_ENGINES.md) | Contour conversion, fitting contracts, region generation, and diagnostics. |
+| [Shape configuration](COMPACT_FIT_CONFIG.md) | Compact Fit and Lining catalogs, validation, and deployment. |
+| [Group encoding](CGROUP.md) | Group records, transforms, shapes, masks, and game dialects. |
+| [Livery encoding](CLIVERY.md) | Sections, paint descriptors, compression, and native export profiles. |
+| [Header encoding](HEADER.md) | Header sidecars across Horizon and Motorsport versions. |
+| [WGS replacement](WGS.md) | Save-container layout, replacement transactions, and recovery. |
 
-  The thin-region API shares native profile fitting and its shape catalog with
-  Lining. It accepts closed polygon regions, including tapers and cutouts, through
-  headless callers. Its area-fitting backend starts with a
-  search for whole-span native shapes before splitting a region. The fallback
-  profile search uses long curve and body candidates. It traces medial paths
-  through narrow regions and matches full or partial native shape profiles to
-  them. Candidate paths can continue through junctions when their tangent
-  directions agree. Noncollinear anchors retain profiles with inflections.
-  The quality search can recover affine native arcs from intact polygon edges.
-  Recovery checks the original painted geometry, seeds coherent strokes when
-  they cover most of the target, and skips the broad search when they already
-  preserve stroke interiors and at least 99.5% of the selected area.
-  Raster screening follows stroke width. Profile area limits follow the span
-  length and estimated width. Quality fits use additional numerical iterations
-  and trimmed profiles.
-  The quality preset uses an overlap envelope that
-  limits local thickness to 2 times the original, with the outward
-  margin as an additional absolute cap. Regions estimate local width from
-  inward boundary crossings. Candidate
-  scores balance useful coverage and extra ink. Refinement grows placements
-  toward a preferred thickness of 1.6 times the original inside the envelope,
-  removes placements that add little coverage while preserving stroke interiors, connectivity and
-  cutouts, repairs continuity gaps and merges neighboring
-  placements into rectangles or other configured native shapes. Group refinement
-  reuses evaluated candidates before fitting bounded local replacements. The
-  quality preset also refits groups through translation, rotation, scale and
-  shear. Optional padding influences selection without requiring extra shapes
-  solely to paint it. Cleanup checks holes against the complete lining union,
-  including occluding leeway layers. Small gaps first try nearby placements.
-  Gap repair distinguishes new interior holes from the edges of original
-  cutouts. Growth caches preferred, permitted and protected geometry in local
-  windows; a window is rebuilt when a placement leaves its support.
-  Growth preserves selected pixels already covered by the lining. Neighbor
-  refinement follows geometric contact and overlap. Very small gap repairs use
-  fine scale steps and preserve the stroke core and enclosed spaces. Rectangle
-  repair accounts for float placement precision.
-  Width
-  growth takes priority over length adjustments at joins. Final verification requires at least 98% coverage and containment
-  within the overlap envelope. Additional disconnected fragments, new interior
-  holes and lost cutouts block completion. Boundary and topology measurements
-  remain in the diagnostics. Leeway describes layers above the lining and permits
-  strokes to continue underneath them. Generated fills are inserted below their
-  leeway group. Failed final checks block insertion, and cancellation
-  discards placements. The public `thin::fillPolygons` API accepts normalized
-  polygon regions for image generation callers. Default API options retain the
-  shorter search with a preferred thickness of 1.15 and a limit of 1.6;
-  `thin::qualityOptions()` selects the longer search. Profile and pose evaluation
-  budgets are configurable. The pose refinement has a separate time budget;
-  reaching it retains accepted placements and proceeds to final verification.
-  Automatic source-image region detection is not part of this API.
-  `assets/lining_shapes.json` is reloaded at the start of
-  each operation; its task schema is described in `COMPACT_FIT_CONFIG.md`.
-  Headless thin-region diagnostics and `lining_fill.log` record configuration,
-  coverage, topology, boundary measurements and stage timings.
-  The API can report phase progress, including profile search stages.
-- Bucket Fill flood-selects pixels with its independent RGBA tolerance and traces
-  pixel-square boundaries. Native cubic fitting detects persistent corners at two
-  scales, shares tangents at smooth junctions, and merges spans under a sampled
-  deviation bound. Raster roughness controls a tolerance band capped by local
-  stroke width. Short stepped cutout sections also retain corners found at the
-  ends of long straight edges; small stair steps remain subject to simplification.
-  Smooth cutout runs between hard corners can merge into a single cubic with
-  independent endpoint handles. Additional merging permits up to four source
-  pixels, capped at 20% of the loop's mean width. The existing raster tolerance
-  remains the minimum. Curved hard-to-hard spans
-  retain one soft midpoint for editing. Failed simplification retries the stricter
-  fit at the same tolerance before reducing the tolerance or using raw pixels.
-  Whole-contour validity and raster comparisons gate fitted loops. A bounded
-  outward mask adjustment can improve selected-pixel coverage while retaining
-  topology and node-count limits. Small cutouts remain available.
-  Conversion precedes the guide transform and is independent of viewport zoom,
-  color tolerance, and fill margin. Completing a Bucket-derived fill retains
-  the guide-layer selection.
-- Use Move tool auto-select from the Options menu to select shapes and groups
-  outside the current selection box. Inside the box, clicks keep the selection
-  and drags move it. With auto-select disabled, Move can drag the selection
-  from anywhere on the canvas.
-- Keep a selected contour-leeway group's world geometry cached while panning and
-  zooming the canvas. Scene edits invalidate the cached overlay.
-- Holding Space on the canvas shows an open hand cursor; panning shows a closed
-  hand. Releasing the pan shortcut restores the active tool cursor. Hand artwork
-  is bundled as XPM in `assets/icons/`.
-- Nudge selected layers/guides precisely in Move or Transform with arrow keys;
-  normal and Shift step sizes are configurable in Settings.
-- Read world coordinates from pan/zoom-aware canvas rulers and manage persistent
-  horizontal and vertical guidelines from their ruler markers.
-- Change frequent tool options in **Tool Settings**, a compact row across the full
-  window below the horizontal toolbar and above the canvas and side panels.
-  The row keeps its dimensions across tools. Controls stay aligned to the left
-  and scroll horizontally when needed. Finishing an edit returns focus to the canvas.
-  They follow the active tool. Bucket exposes a tolerance slider and
-  editable field synchronized with canvas scrolling. Bucket fits cubic curves.
-  Move exposes Auto Select, Select exposes Selection Flash,
-  rectangular picking and selected outlines, Transform exposes Relative Transform
-  and drag handles, and Pipette exposes Auto Return. Pen exposes Analytical and
-  Compact fill modes and Save Path. Lining uses its dedicated experimental fitter
-  and exposes width, outside margin, and its own Save Path.
-  Numeric controls support typing, sliders, and wheel adjustments. These controls
-  live in Tool Settings and retain their values between launches. Keyboard shortcuts
-  for these options remain available.
-- Edit layer properties: name, shape ID, position, scale, rotation, skew,
-  opacity, color, visibility, mask, and lock state. Direct numeric input accepts
-  arithmetic expressions with parentheses and `+`, `-`, `*`, `/`, and `%`.
-- Edit a group or multi-shape selection's position, scale, rotation, and skew as
-  a unit: the values transform the selection's bounding box (about its centre)
-  rather than each shape in place. A group also carries its own transform frame in
-  the scene tree — transforming a whole group (on the canvas or via the property
-  panel) accumulates the group's frame while its descendant leaves stay baked, so
-  the group owns its transform and rendering composes it down the tree.
-- Livery logos are first-class raster layers (a `Shape` with a `RasterContainer`),
-  rendered uniformly with vector shapes on the canvas, in the 3D car preview, and in
-  the layer-tree / clipboard / shapes-browser thumbnails.
-- Drag numeric property labels vertically for live value changes.
-- Use editor-only raster guide layers for references; guide layers are saved in
-  the project container and ignored by game export. Guide layers can render above
-  or below shapes, can be shown or hidden together, and can be sampled by the
-  Pipette/color picker ignoring guide opacity.
-- Preprocess one selected, unlocked guide from **ImgGen → Preprocess Image…**.
-  The Qt/C++ pipeline starts from the `anime_detail` settings, performs
-  edge-preserving smoothing, median flattening, and circular-hue HSV palette
-  clustering, then buckets clusters below the configurable minimum color share
-  into their nearest retained color. It then converts visible pixels to a 16-bit
-  palette-index image; detail selection, edge cleanup, line preservation, and
-  optional region flattening operate only on those labels. Sobel magnitude from
-  the smoothed source produces a one-pixel-dilated edge mask. Local detail can
-  select a different retained label in region interiors, fades toward detected
-  edges, and is disabled throughout the edge mask by default. Output therefore
-  remains strictly palette-only.
-  Fully transparent source pixels remain transparent, while every partially or
-  fully visible pixel becomes fully opaque. The advanced speckle threshold is the
-  maximum component size eligible for 3×3 or 5×5 label-majority replacement over
-  zero to two edge-cleanup passes. Optional flat fills replace labels inside large
-  edge-bounded regions with the region's dominant label. Dark thin-line separation
-  is enabled by default: it derives a dedicated line color, reserves a palette
-  slot, and keeps detected line labels immutable; the color can be overridden.
-  Colors chosen with the color dialog or either preview's eyedropper are locked
-  while HSV clustering fills the remaining color limit. Importing project
-  swatches switches to a fixed palette containing those swatches plus any manual
-  additions; fixed-palette output uses only those exact colors. Colors can be
-  removed from either palette. The final palette is added to project swatches as
-  part of the same undoable edit. The final retained-color count is stored on the
-  guide and becomes the palette cap for region extraction. The dialog shows
-  the original beside an asynchronously regenerated downscaled preview, exposes
-  four main controls and keeps the remaining numeric controls under **Advanced
-  settings**. Both views share wheel zoom and mouse-drag panning, with **Fit**,
-  **100%**, and double-click-to-fit navigation. **OK** processes the original
-  resolution, preserves dimensions, produces binary alpha, and replaces
-  the guide image as one undoable edit. **Create Regions** and **Fill Regions**
-  are also in the **ImgGen** menu. Create Regions merges components below its
-  persistent ImgGen area slider into the adjacent component with the closest RGB
-  colour before tracing. Region filling runs without blocking the main window.
-  The cleaned label raster produces a conservative back-to-front layer plan:
-  connected exact-colour regions are combined, nearby exact-colour regions can
-  be joined through a bounded foreground-only bridge, enclosed exact-colour regions
-  can share a unit, and small enclosed regions are incorporated into their surrounding
-  backdrop while remaining as later overlay units. Rasterized coverage establishes
-  the draw dependencies needed to restore differently coloured ownership above an
-  expanded backdrop. A dependency cycle or failed raster comparison rolls back one
-  contributing nearby, adjacent, containment, or absorption operation and rebuilds
-  the plan, preserving independent unions. Nearby bridges prefer simple ownership:
-  paths crossing more than one differently coloured source are rejected, while a
-  directly adjacent pair cannot reconnect through the nearby-merge path after its
-  adjacent operation is suppressed.
-  The complete plan is compared pixel-for-pixel with the existing vector-rendered
-  baseline before fitting. Fill Regions retains two comparison variants: the
-  visible **Safe** group rolls back operations until that comparison is exact, while
-  the hidden **Dangerous** group keeps the first plan that differs from the baseline
-  so its optimizations can be inspected manually. Dangerous additionally joins
-  same-colour closed contours through a hierarchical straight-corridor graph. A
-  candidate exists only when outer-boundary contact pixels have direct straight-line
-  visibility entirely through one connected foreground lineart component. Winding
-  routes, differently coloured regions, and transparent background are impassable.
-  Progressive corridor widths are clipped to eligible lineart pixels and ranked by
-  traced contour-point cost before estimated shape count. Spatially separated straight
-  contacts can be bundled when their combined expansion further simplifies the merged
-  contour. Each accepted bridge is re-evaluated against the currently expanded groups;
-  additional contacts must lower that group's current fitting cost, and a bridge cannot
-  overlap pixels claimed by another expanded group. Deterministic Kruskal levels then
-  produce successively larger merged contours. During fitting, every Safe and Dangerous
-  unit sends a 32-sample cyclic closed-RDP contour at epsilon 1.9 directly to the polygon
-  mesh; failures retain the existing Pen and mesh recovery path. The log records each
-  variant's RDP input/output counts, straight visibility,
-  attachment count, expanded-group cost, corridor width, and hierarchy level. Dangerous also tries
-  square morphological closing at several radii and a convex contour. A geometry
-  candidate is eligible only when every filled pixel was already the exact same
-  colour or classified lineart; candidates entering another colour or transparent
-  background are rejected. The candidate with the fewest traced path elements is
-  retained. Connector candidates are rasterized in their local bounds and cached across
-  dependency-cycle rebuilds; morphological and convex trials run only after dependency
-  recovery reaches its final plan. Dangerous disables optimization safety: it retains
-  every bridge, containment, absorption, morphology, and convex operation even when
-  validation reports changed pixels or their layer dependencies contain cycles. Cycles
-  are completed with a deterministic forced draw order, preferring enclosing backdrops
-  before their absorbed overlay regions when possible. The log marks this policy with
-  an explicit warning because the resulting output may overlap other colours, hide
-  regions, or have broken ordering. Dangerous removes the area limit for
-  enclosed-region absorption. The
-  enclosing backdrop fills through an absorbed region and that region remains a
-  later, topmost overlay unit.
-  The Safe and Dangerous variants are inserted under one
-  **Region Fill** container and can be compared by toggling their visibility. If no
-  validation difference exists, both variants contain the same plan. The fitted
-  output comparison is also saved as a visible **Dangerous Differences** guide at
-  the top of the source guide's parent: red is Safe-only coverage, cyan is
-  Dangerous-only coverage, and yellow means both variants cover the pixel but render
-  different colours. Fitting runs in parallel on
-  half of the available CPU threads, writes results into fixed plan-index slots,
-  restores draw order before insertion, reports planning, bridge scoring, dependency
-  recovery, simplification, and completed/total fitting phases in the status-bar
-  progress bar, and remains cancellable with **Esc** during planning and fitting.
-  Pen recovery uses the same optimized Pen-point and curve-Primitive fitter as Bucket
-  Fill. Dense traces are no longer skipped at
-  a fixed point-count cutoff: removable cubic junctions use a 1.1-pixel cap,
-  preserve orientation and non-crossing single-contour topology, and are
-  accepted only when a native-size, 4x-supersampled raster comparison remains
-  at or below DSSIM 0.001. Soft runs whose exact maximum offset remains within
-  the same cap are reduced to the chord between their hard endpoints. An unsafe
-  candidate is backed off through a bounded adaptive search. Curve candidates on
-  dense contours are ranked by visual
-  importance and evaluated under a point-count-scaled budget, preventing the
-  curve search from consuming the whole per-region deadline. If a soft-run
-  reduction cannot be fitted, the fitter retries the hard-only reduction before
-  retrying the unmerged Potrace controls and using a mesh fallback. Unavoidable
-  fallbacks retain the hard-only contour for the mesh simplification stage. If Pen
-  rejects a contour before producing optimized points, the original traced outer
-  contour is recovered and meshed instead of dropping the unit. Fallbacks apply a
-  0.45-pixel RDP pass, accept it only when the
-  result remains a valid non-crossing polygon, and retry the original contour if
-  simplified triangulation fails. Large polygonal cores evaluate transformed Circle
-  primitives as ellipses. A core within 0.5 percent symmetric-difference of an ellipse
-  is replaced by that single shape; fully contained ellipses can also replace multiple
-  mesh primitives they cover. Per-unit and summary logs report the selected core
-  ellipse count. Scene insertion keeps the
-  result in one **Region Fill** container with one child group per filled unit.
-  Before tracing, progressive line-classification votes identify narrow connected
-  fringe components and absorb each chain into its strongest shared-boundary color
-  neighbor. Candidate widths are normalized to the median recognized stroke width,
-  and persistent historical evidence can classify a component independently of
-  final-mask adjacency. A chain enclosed by recognized lineart is incorporated into
-  that mask.
-  `region_layer.log` records separate Safe and Dangerous sections with source-to-unit
-  mappings, adjacent and nearby unions, hierarchical contour connectors and levels,
-  absorptions, per-rebuild rollback reasons, operation-specific suppression counts,
-  foreign-owner bridge rejections, bridge widths and path-element scores,
-  morphological/convex selections, selective geometry suppressions, point reductions,
-  Dangerous cycle breaks, dependency counts,
-  validation, and fallback state.
-  `region_fill.log`
-  records every planned
-  unit result, its source labels, hard and soft point reductions, the fitted Safe vs.
-  Dangerous heatmap difference count, and the largest
-  unit's original, optimized, and flattened contour point counts plus DSSIM.
-  `region_points.log`
-  records every raw path element, optimized Hard/Soft Pen point, and flattened
-  optimized-contour point for that largest region. `region_extract.log` records
-  progressive segmentation counts, line-vote persistence, cleanup decisions,
-  output ordinals, and per-component topology and colour metrics.
-- Store project-specific color swatches in the `.3so` project document.
-- Manage layer/group trees with thumbnails, visibility/mask/lock badges,
-  grouping, ungrouping, deletion, reordering, reparenting, copy/cut/paste, duplicate,
-  and stamp. Drag shapes or groups between parents or to the displayed root;
-  rows above other rows draw above them. Reparenting preserves authored properties
-  and world transforms by recalculating local transforms. Ordinary groups with
-  fewer than two children are removed; a remaining child inherits the group
-  transform and effective state at the same draw position. Livery section
-  containers remain. Visibility, mask, and lock
-  edits in Properties and selected-row badges apply to the entire selection.
-  An unselected-row badge edits that row without replacing the selection.
-  Livery section labels show live leaf counts after structural edits;
-  switching sections reuses cached tree rows and keeps root guide layers available.
-- Browse and insert vector shapes from the Shapes dock.
-- Place text as a line of vector font glyphs (toolbar **Place Text**): pick one of
-  the 11 fonts, type a string, and the glyph shapes are laid out proportionally at
-  the view centre and grouped into a new group named after the text. A Monospace
-  flag (persisted in QSettings) instead advances every glyph by a fixed cell — the
-  font's average glyph width, computed separately for upper- and lower-case.
-- Edit project metadata from the Header dock. Name, creator, and year changes
-  rebuild the project header when input finishes. Livery projects also expose
-  their target car and a Change button there. Cars absent from FH6 are shown in
-  yellow in both the header and target-car picker. The Project dock remains a
-  read-only summary.
-- Align and distribute the current selection from the **Edit** menu. **Align**
-  (Top/Bottom/Left/Right/Horizontal Centre/Vertical Centre) snaps each selected
-  top-level unit — a whole group counts as one unit, loose leaves individually —
-  to a shared edge or centre line.
-  **Distribute** (Vertical/Horizontal) evens the gaps between unit bounds
-  along one axis; a lone selected group distributes its own direct children. Both
-  evaluate world-space shape geometry.
-- Export through one **Export…** action with a dedicated Qt dialog for the
-  destination path, folder browsing, game version, and container format. The
-  supported PGS targets are FH2, FH3, FH4, FH5, FH6, FM5, FM6, FM7, and Forza Motorsport 2023. FH5 WGS output
-  replaces an existing registered asset through a container-descriptor selector,
-  with automatic save-profile and container-name fields. The
-  dialog remembers its geometry and uses the remembered export destination.
-  Export writes a grouped (nested) `C_group`
-  folder — preserving group structure, nesting, and masks — plus copied sidecars, a
-  preview thumbnail, and draft/imported header handling. The same action exports
-  imported and newly created livery projects while preserving visible section
-  group structure, nesting, and masks. With a
-  car model loaded, livery export writes the target game's thumbnail from the
-  textured car render. FH2, FH3, FH4, FH5, FM5, FM6, and FM7 use PNG thumbnails and compressed
-  `C_group` or `C_livery` payloads. Motorsport 2023 uses GUID asset folders with `data`, `header`,
-  and PNG `thumbnail` files; group data is raw and livery data is block-compressed.
-  Compatible imported positional paint metadata is retained. Unmatched paint
-  data receives native inherited defaults. All targets except FH6 discard window
-  artwork and retain the six body sections through Spoiler.
-  WGS export checks the active descriptor generation, asset type, target car,
-  and profile identity before staging the payload. It preserves slot and blob
-  identifiers and opaque index fields, updates timestamps and sizes, and backs up
-  the index and selected container under `.fls-wgs-backups` in the profile folder.
-  Writes use atomic file replacement with rollback on failure. The game must be
-  closed and cloud synchronization finished before replacement. New WGS slots
-  and other games' WGS layouts remain deferred. See `WGS.md` for the pipeline.
-  The preview's **Color** control stores one opaque default solid color in the
-  project's canonical livery paint-material bindings. The same records drive the
-  live car, project JSON round trips, FH6 native `C_livery` export, and the thumbnail.
-- Preview a car in 3D with the current vinyl applied: **Import Car Model…**
-  decodes a `.modelbin` (single model), a `.carbin` (full car - referenced parts
-  assembled with their per-part transforms), or a zipped car folder (`.zip`) and
-  shows it in the **3D Preview** dock.
-  The vinyl scene is rasterized into a configurable paint-canvas texture (4x by default).
-  Until a model is rendered, the dock reports model loading, model availability,
-  or graphics API availability.
-  Imported sections retain their XML origins and are stored in isolated paint regions.
-  Mesh UV channel 3 is transformed by the corresponding per-mesh texture-coordinate
-  vector from the model bundle. The fragment shader converts the transformed coordinates
-  from backing-texture addressing into the mask atlas, resolves them against the supplied
-  `*.swatchbin` masks, and remaps the covered section into its paint region. Meshes without
-  this UV data use the geometry projection registered from the
-  model scene, XML axes, mask boundaries, part classifications, and locator transforms.
-  Section-coordinate orientation is normalized while building and sampling the isolated
-  paint regions; decoded project geometry remains unchanged.
-  **Show Section Wireframe** adds the selected preview LOD's topology as a white, mask-bounded
-  wireframe over the canvas overlay. Cycling the preview LOD rebuilds the canvas overlay from the
-  same geometry. The 3D preview draws that topology as a final constant-width line pass, with
-  back-facing fragments removed and draw order independent of the car depth buffer. It does not
-  add scene or export entries.
-  The highest-detail topology is used when a selected LOD supplies no relevant paint geometry.
+## Build and run
 
-  Upgradable carbin entries retain their option IDs, stock/body compatibility, and complete
-  model-instance membership. The preview uploads the stock and alternative model sets and filters
-  them at draw time. Its `Parts` drawer exposes only body kits, rear wings, bumpers, hoods, and
-  side skirts; selecting a body kit synchronizes subordinate options carrying the same kit ID.
-
-  Shaded rendering starts at `LOD0`. The preview side panel's `LOD` tab selects every available
-  detail level as `LOD0`, `LOD1`, and so on. A part retains its least detailed available mesh when the
-  assembled car has further LODs supplied by other parts. Its focus-scoped cycle command is
-  unbound by default, as is the preview debug-mode cycle. The swatch masks are uploaded to the
-  GPU as a 2x upsampled texture array. Imported `C_livery` section geometry is not rewritten for the preview;
-  texture-coordinate conversion is performed in the car shader's sampling path while
-  mask sampling remains in the original swatch orientation. The preview updates live as
-  layers are edited.
-  A "reference only" note is pinned in the preview's corner because its material and
-  lighting remain a simplified representation of the in-game renderer.
-  A livery's imported paint state carries, per paintable region, a game **finish**
-  code (a global paint-material enumeration). The preview resolves each code to its
-  real painttype material: the finish catalog decodes the matching `.materialbin`
-  (read from the game's paint-materials archive) into gloss, metallic, and
-  two-tone/self-coloured shading, and loads that material's pattern/normal/surface
-  swatchbin textures (carbon weave, camo, wood, damascus, brushed-metal, packed
-  roughness/metal/AO) from the game's textures archive. The car shader tiles the
-  pattern colour, packed surface, and detail normal over the region and composites
-  the livery on top. Unmapped codes fall back to a small built-in approximation. See
-  `GAMEDATA.md` for where the enumeration, materials, and textures live in the game
-  media folder.
-  The preview's `PAINT` tab edits each supported region's primary and secondary colors
-  without replacing its finish, and selects Gloss, Semigloss, Metallic, or Matte finishes.
-  Body edits also replace the hood, mirror, and wing records while the UI's child-part
-  override is enabled. The paint reset clears the project paint state as an undoable edit.
-  Authored car draw groups determine whether a mesh
-  participates in exterior paint and livery rendering.
-  Non-paint parts take their real shading from the game's shared `_library` materials:
-  each mesh's materialbin (gloss, F0→metallic, base colour) is decoded and merged in
-  whenever a car loads — this tuning is cheap and always applied, independent of the
-  opt-in texture setting, which now only gates the heavier `.swatchbin` texture uploads.
-  Name-based material heuristics remain as a fallback and yield to the real material
-  data when it resolves. Wheels and tires bind their materials by slot name (their
-  modelbins carry no materialbin path), mapped to the shared wheel/metal/rubber
-  materials; rims stay paintable from the livery paint state. Solid geometry is
-  back-face culled so recessed intakes/grilles stop z-fighting, while glass and the
-  approximated tires/wheel discs render double-sided.
-  When a livery project is opened, the matching car model is auto-loaded in the
-  background from the
-  configured **game folder** (matched by the livery's target car id → the car
-  registry's model code, searched recursively under `media/Cars`). If the folder is
-  unset the app prompts once to pick it; it can also be set in Settings. A **Discard
-  current model on livery open** option (on by default) controls whether opening a
-  livery replaces the currently loaded model or keeps it. Changing the target car
-  always reloads the matching preview model. Native car **texture** loading (the
-  `.swatchbin` pattern/normal/surface maps) is an opt-in preview setting and is
-  disabled by default; material tuning above loads regardless. Model, material,
-  mask, and enabled texture decoding run outside the UI thread.
-- Configure UI theme, canvas, preview-background and guideline colors, layout,
-  keybinds, behavior options, guide
-  visibility borders, transform-drag anchors, nudge step sizes, the game folder,
-  and the discard-model option. The single **game folder** (the Forza install root
-  or its `media` directory) is the source for auto-loaded car models and painttype
-  paint materials; every game resource path is derived from it. Every menu-bar action can be bound to a hotkey in the
-  keybind settings, even those with no default shortcut.
-  Duplicate keybinds are outlined in red as they are edited; applying conflicting
-  assignments also reports the two commands and their shared key sequence.
-  Buffer and layer-preview backgrounds independently support theme-default,
-  checkerboard, and custom modes. The toolbar can use a vertical icon-only layout.
-  Fresh settings default to the Dark theme with theme-default canvas colors.
-- Collapse dock areas from the dock title-bar collapse buttons. The button appears on
-  only one dock per area (never duplicated across split docks) and is hidden on
-  floating docks.
-- Show selected-layer flash with `\` or from the Options menu.
-- Switch Transform Relative mode from the Options menu when transform handles
-  should follow the selected shape or group rotation.
-
-Grouped `C_group` export is the canonical group export path. It preserves group
-semantics: each group is written with a
-translation-only origin transform and shapes packed relative to it, mask groups are
-emitted as `60` records with per-shape trailing mask flags, and nested groups carry
-their own child-type bitmaps. It is not byte-identical to the game's own encoding.
-
-Livery (`C_livery`) export is available through the core and GUI for imported and
-newly created projects. Visible section groups are emitted as nested records with
-composed group and shape transforms. Mask ancestry and trailing shape-mask state
-remain represented. A terminal masked shape uses the trailing `01` marker after
-the section walk. Structured sections emit inherited mask leads, single-byte
-group-to-shape state transitions, and complete positional remnants.
-
-## Build
+CMake 3.24 or newer, a C++20 compiler, Qt6 Core/Gui/Widgets/OpenGL/
+OpenGLWidgets/Svg, and zlib are required. Clipper2 and Potrace are compiled from
+`third_party/` and linked into the editor. CUDA acceleration is detected at
+configure time; CPU implementations remain available.
 
 ### Windows
 
+Install the Qt base, image-format, SVG, and zlib packages for vcpkg's
+`x64-windows` triplet, with the Visual Studio C++ build tools installed. Set
+`VCPKG_ROOT` to the vcpkg installation; configuration otherwise checks
+`C:\vcpkg` and `C:\vcpkg\vcpkg`.
+
+From the repository root:
+
 ```powershell
-.\tools\configure.ps1
 .\tools\build.ps1
-```
-
-The scripts use `VCPKG_ROOT`, defaulting to `C:\vcpkg` or `C:\vcpkg\vcpkg`,
-and target `x64-windows`. Build output is written to `build\Release`.
-GUI asset deployment validates every manifest entry before it changes the live
-asset directory. Files are copied into a separate staging directory, then the
-previous assets are preserved while the staged directory is published. A missing
-source file or a staging-copy failure leaves the live assets intact. Publication
-failure attempts to restore the previous directory and reports any recovery paths.
-Shape data and fill catalogs are checked together by the headless
-`release_shape_catalog` test, which runs with an isolated working directory to
-exclude source-tree fallback. `gui_asset_deployment` tests replacement and failure
-preservation. Restart the editor after restoring missing runtime assets, since
-the canvas and shape browser load their geometry during initialization.
-The vcpkg installation must include `qtsvg:x64-windows` in addition to the
-existing Qt base and image-format packages.
-Test executables are excluded by default. Configure with
-`-DFLS_BUILD_TESTS=ON` when they are required.
-Project conversion tests save and reload packed documents around game export,
-then compare shape identities, colors, masks, section assignments, and world
-transforms. Local assets under `tests/encoder roundtrip` are registered as an
-additional fixture test when that directory exists at configuration time.
-The export-target test drives the dialog through an offscreen Qt platform.
-Native-reference tests compare decoded geometry across game versions and check
-saved-project exports against authoritative headers and decompressed payloads.
-Header identity and publication metadata are normalized for comparison.
-Cross-game comparisons allow paint colors, selectors, finishes, and unmatched
-entry tables to differ; artwork, counters, record framing, and trailers must match.
-Compatible same-game paint and entry tables must survive unchanged.
-Complex-reference tests exercise every source and destination pairing through
-saved project documents. They compare shape order, geometry, colors, effective
-masks, visibility, and section assignment against the destination's reference.
-Their report records byte equality separately from scene equivalence, since
-group origins and transform frames can have equivalent encodings. Opaque header
-trailers are excluded from the normalized core-header comparison.
-
-```powershell
-ctest --test-dir build -C Release -R "game_export|game_native_references|game_complex_references|game_project_roundtrip|export_target" --output-on-failure
-```
-
-Public builds enable `FLS_PRIVACY_POLICY` by default, which blocks importing
-locked game content. Private development builds can opt out at configure time:
-
-```powershell
-cmake -S . -B build -DFLS_PRIVACY_POLICY=OFF
-```
-
-Livery export shape-limit enforcement is controlled by `ENFORCE_SHAPE_LIMITS`
-and defaults to `ON`. Top, Left, and Right sections allow up to 3000 shapes;
-the remaining sections allow up to 1000. Configure with
-`-DENFORCE_SHAPE_LIMITS=OFF` when this validation is not required.
-
-### Linux (Arch)
-
-**Prerequisites:**
-
-Install build dependencies:
-
-```bash
-# Arch (SteamOS)
-sudo pacman -S qt6-base qt6-tools qt6-svg zlib cmake gcc ninja
-
-# Ubuntu/Debian
-sudo apt install qt6-base-dev qt6-tools-dev qt6-svg-dev zlib1g-dev cmake g++ ninja-build
-
-# Fedora
-sudo dnf install qt6-qtbase-devel qt6-qttools-devel qt6-qtsvg-devel zlib-devel cmake gcc-c++ ninja-build
-```
-
-**Configure:**
-
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-```
-
-CMake will automatically detect Qt6 and ZLIB from system packages.
-Public builds enable `FLS_PRIVACY_POLICY` by default, which blocks importing
-locked game content. Private development builds can opt out with:
-
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DFLS_PRIVACY_POLICY=OFF
-```
-
-**Build:**
-
-```bash
-cmake --build build
-```
-
-Build output is written to `build/ForzaLiveryStudio`.
-
-### Runtime Assets
-
-Runtime assets live in `assets/` (repo root). The build copies that folder next
-to the editor executable. Compact Fit reads `assets/compact_fit_shapes.json`,
-Lining reads `assets/lining_shapes.json`, icons live in `assets/icons/`, and
-vector data lives in `assets/vector/`.
-
-## Run
-
-### Windows
-
-```powershell
 .\tools\run.ps1
 ```
 
-Or run the generated editor executable from `build\Release\ForzaLiveryStudio.exe`.
+The build script invokes `tools/configure.ps1` and builds Release into
+`build/Release`. The executable is `build/Release/ForzaLiveryStudio.exe`.
+Close the editor before replacing it during a build.
 
 ### Linux
 
+Install Qt6 development packages with SVG support, zlib, CMake, and a C++20
+compiler through the distribution package manager, then run:
+
 ```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ./build/ForzaLiveryStudio
 ```
 
-## Cross-Platform Notes
+Qt6 and zlib are resolved from system packages. Windows-specific integrations
+are guarded in the source.
 
-The codebase is designed to build on both Windows (via vcpkg) and Linux (via system packages). Platform-specific code (Windows COM for image decoding, Windows libraries) is guarded with `#ifdef Q_OS_WIN` and is automatically skipped on Linux. Qt provides portable abstractions for all GUI and system operations.
+### Configuration
 
-## Repository Layout
+| CMake option | Default | Purpose |
+| --- | --- | --- |
+| `FLS_ENABLE_CUDA` | `ON` | Detect and build optional fill accelerators. |
+| `FLS_PRIVACY_POLICY` | `ON` | Reject imports carrying the native locked-content state. |
+| `FLS_BUILD_TESTS` | `OFF` | Build test executables and register CTest checks. |
+| `FLS_BUILD_HELPER_TOOLS` | `OFF` | Build model, decal, and finish inspection tools. |
+| `FLS_BUILD_LIVERY_COMPARE` | `OFF` | Include the livery comparison tool when helper tools are enabled. |
+| `FLS_ENABLE_IMGGEN_MENU` | `OFF` | Expose experimental image-generation actions. |
 
-- `src/`  EC++ sources (`core/` library, `gui/` editor split into
-  `app/ state/ canvas/ widgets/`, and `main.cpp`). The core library target is
-  `fls_core`.
-- `assets/`  Eruntime configuration, `icons/`, and vector data, copied next to
-  the executable at build time.
-- `tools/`  Ebuild/utility scripts (`configure.ps1`, `build.ps1`, `run.ps1`,
-  `gen_xpm.ps1`, `gen_xpm.py`) plus optional dev-only console harnesses
-  (`livery_compare`, `model_dump`, `pack_decals`, `finish_dump`). `finish_dump`
-  prints each livery paint-finish material's resolved render parameters
-  (`--library <gameFolder>`) or one materialbin's decoded parameters
-  (`--material <file>`), for tracing mis-shaded finishes. The harnesses are gated
-  behind `FLS_BUILD_HELPER_TOOLS` (OFF by default) and are not built for shipping.
-  Note: the scripts are Windows-only; on Linux, use CMake directly.
-- `docs/`  Ethis file, `MANUAL.md` (end-user shortcuts/tools), `GAMEDATA.md`
-  (the game media folder layout and where the resources the editor reads live), and
-  consolidated format notes for Forza Horizon and Forza Motorsport containers, groups,
-  liveries, and headers.
+`tools/configure.ps1` applies the public editor configuration on every scripted
+build, resetting tests, helper tools, and ImgGen to `OFF`. For a custom build,
+run that script first, apply the required options with `cmake -S . -B build`,
+and use `cmake --build build --config Release` directly.
 
-## Code Map
+The privacy policy checks the decoded payload: the group lock marker at `0x1D`
+or the livery source-state field at `0x08`. Published header metadata is retained
+separately. Private development configuration can set `FLS_PRIVACY_POLICY=OFF`.
+Livery export validates per-section shape counts against the supported limits.
 
-- `src/main.cpp`
-  - Application startup.
-- `src/core/`
-  - Binary codecs, vinyl tree decoding, livery decoding, project JSON, flat and
-    nested payload export, matrix math, header parse/build, and shape registry.
-    `VinylTreeDecoder` provides the shared group and livery decode pipelines.
-    Format profiles supply record normalization, root-header handling, terminal
-    padding, and post-decode state while both formats use the same tree walkers.
-    The FM container reader concatenates sequential compressed blocks and extracts
-    the complete tagged stream before entering that pipeline.
-    The livery decoder handles the embedded `gyvl` transform dialect (including
-    framed 9-byte separate-transform trailers), 16-bit child and bitmap-block counts,
-    reserved group bytes, registry-backed vector ID validation, custom-logo stats
-    weighting, and section-root boundary guards before converting the decoded tree
-    into scene layers.
-  - `layer.*` / `visual_container.h`: the unified scene-object hierarchy in
-    namespace `fls::scene` — `Layer` (id, `Transform2D`, opacity, visibility/lock,
-    parent) subclassed by `Shape` / `GuideLayer` / `Group`. A group carries its own
-    transform and owns its children (`std::vector<unique_ptr<Layer>>`), so transforms
-    compose down the tree (`worldMatrix()`); leaf visuals are stored separately as a
-    `VisualContainer` — `VectorContainer` (shape id) or `RasterContainer` (a logo
-    decal's pixels/id, or a guide's inline image). `clone()` deep-copies for undo.
-  - `scene_codec.*`: recursive `kind`-discriminated tree JSON for the canonical
-    `Project::root` scene. Imports/load populate `Project::root`, save serializes it
-    directly, rendering/editor state walk it directly, and export derives payload records
-    from visible scene leaves.
-  - `raster_decals.*`: the indexed decal-pixel pack, plus `sharedRasterDecals()` — a
-    process-wide lazily-loaded pack shared by every surface that draws logos (GL
-    canvas, layer-tree/clipboard/browser thumbnails).
-  - `model_bundle.*` / `model_geometry.*` / `model_material.*`: read-only decoder
-    for ForzaTech "Grub" bundles (`.modelbin`) — blob/metadata parsing, nested
-    material resources, typed shader parameters, and per-mesh geometry dequant
-    (positions/normals/UVs/indices, bone transforms, texture-coordinate transforms).
-    Material defaults retain their native texture slots and UV tiling for preview use.
-    Decoded materials also expose derived paint fields (metallic from F0 reflectance,
-    flake amount, flake-normal texture) for painttype finishes.
-    Resolved material defaults and decoded textures are retained in bounded runtime caches,
-    while uploaded native textures are reused for the lifetime of the preview context.
-    No proprietary DLL is required.
-  - `material_hashes.h`: shared paint-binding and material-parameter hash
-    catalogue used by container encoding, model decoding, texture selection, and
-    preview paint binding.
-  - `manufacturer_colors.*`: decodes the car-specific manufacturer paint
-    palette and its material bindings.
-  - `paint_finish_catalog.*`: the global livery-material enumeration (finish code →
-    display name → painttype `.materialbin` stem → category) plus `PaintFinishLibrary`,
-    which decodes each material into `PaintFinishRender` shading parameters keyed by
-    finish code. Reads materials from the game's paint-materials archive or a loose
-    folder of materialbins.
-  - `game_paths.*`: resolves resource locations (media dir, `Cars`, the paint
-    materials/textures archives) from one game install folder.
-  - `car_scene.*`: `.carbin` reader (ported from CarbinParser) — parses the part
-    list, resolves each referenced `.modelbin` next to the carbin, and bakes each
-    part's transform (× its own skeleton bone) into a merged `CarModel`. Stock
-    selections form the displayed mesh set; all variants also form a projection-only
-    mesh set used to register the universal livery masks. Part classifications and
-    sibling locator transforms and material paint bindings are retained.
-  - `zip_extract.*`: minimal ZIP extractor for car model archives. The 3D preview
-    extracts `.zip` car folders to a temporary directory, then reuses the normal
-    `.carbin` and sibling-asset loading path.
-  - `swatchbin.*`: decoder for `.swatchbin` livery-mask textures (a Grub bundle
-    wrapping a TXCB texture blob). Decodes PC-format (linear) BC4/R8 masks to a
-    single-channel `SwatchMask`; Xbox/Durango tiled textures are unsupported.
-  - `livery_masks.*`: parses a car's `LiveryMasks/` folder — `Masks.xml` per-side
-    planar-projection parameters plus the body-side coverage swatchbins — into a
-    `LiveryMaskSet` used for atlas coverage and projection fallback.
-- `src/gui/app/` (`main_window.*`, `dock_chrome.*`, `settings_dialog.*`,
-  `theme_manager.*`, `gui_assets.*`, `gui_constants.h`, `perf_utils.h`)
-  - Main editor shell, menus/toolbars/docks, import/export actions, drag/drop,
-    project save/load, unsaved-change prompts, and selection synchronization;
-    plus app settings, theming, dock title chrome (including
-    the dock-area collapse buttons), asset/icon loading, opt-in perf timing, and
-    cross-cutting UI constants.
-- `src/gui/state/` (`editor_state.*`, `editor_state_commands.cpp`, `editor_state_selection.cpp`,
-  `editor_state_clipboard.cpp`, `editor_state_grouping.cpp`,
-  `editor_state_snapshot.cpp`, `layer_tree_model.*`, `scene_view.h`)
-  - Project ownership, index cache, lock/visibility/mask propagation, and
-    shared Qt signals in the core file; the command dispatcher owns validation,
-    transactions, property propagation, and reparenting. Properties controls,
-    Layers edits and selection, and Edit actions submit state commands.
-    `tools/gui_command_test.cpp` exercises the production widgets through Qt
-    events and checks command delivery, history, tree integrity, world transforms,
-    and export round trips. `tools/gui_startup_test.cpp` exercises startup with
-    hidden windows, both themes, and saved layouts. Selection, clipboard/duplicate/insert,
-    group/ungroup/reorder, and undo/redo snapshots in the per-concern units;
-    the layer/group/guide tree model; and shared scene transform/local-rect
-    helpers plus the bounds accumulator.
-- `src/gui/canvas/` (`project_canvas.*` plus its per-concern implementation units
-  `project_canvas_hit.cpp` / `project_canvas_drag.cpp` / `project_canvas_cursor.cpp` /
-  `project_canvas_paint.cpp` / `project_canvas_events.cpp` and the shared
-  `project_canvas_internal.h`; `canvas_tools.*`, `native_shape_renderer.*`,
-  `car_model_renderer.*`, `drag_cursors.*`)
-  - OpenGL canvas, pan/zoom, coordinate rulers, project guidelines, hit testing, guide layer rendering, selection
-    overlays, color sampling, visibility borders, keyboard nudging, and cursor
-    handling. `ProjectCanvas` is one class declared in `project_canvas.h` but split
-    across translation units by concern (lifecycle/view in `project_canvas.cpp`;
-    hit-testing/selection-box in `_hit`; drag gestures in `_drag`; cursor resolution
-    in `_cursor`; painting/overlay/flash/guides in `_paint`; input events in
-    `_events`), mirroring the `editor_state_*` layout; the anonymous-namespace helpers
-    shared between those units live in `project_canvas_internal.h`. Read paths walk the
-    scene through the shared `forEachSceneShape`/`forEachSceneGuide` iterators, which
-    hide the EditorState-render-entries vs. canvas-local-tree backends. Per-tool
-    interaction strategies
-    (select/move/marquee/transform/rotate/pipette/pen/lining) as
-    `CanvasTool` subclasses;
-    `pen_fill.*` owns quadratic contour validation, Primitive silhouettes,
-    outward-curve fitting, bounded core construction, and union-area reporting;
-    `lining_fill.*` owns open-centreline construction, semantic span fitting,
-    stroke containment, and overlap-connected lining Primitive selection;
-    `polygon_mesh.*` owns polygon normalization, intersection validation,
-    deterministic ear clipping, maximum compatible square pairing, and exact
-    Square/Triangle affine placement;
-    OpenGL shape rendering (`native_shape_renderer`, which walks the `scene::Group`
-    tree with a matrix stack — composing each group's frame into its descendants and
-    dispatching vector vs raster off the visual container — and also exposes
-    `renderSceneToTexture` for the 3D preview); the perspective/depth car mesh
-    renderer (`car_model_renderer`) whose fragment shader applies the livery through
-    transformed mesh UV3, converts backing-texture coordinates into the mask atlas,
-    resolves coverage from the swatch texture array, normalizes section coordinates,
-    samples separate packed paint regions, and shades non-paint materials with native
-    diffuse, alpha, normal, surface, and emissive maps. Paintable regions take their
-    gloss/metallic/flake and two-tone/self-coloured shading from the finish resolved
-    through `PaintFinishLibrary` for the region's livery finish code; flake finishes add
-    a procedural per-cell sparkle gated to the highlight. Non-paint meshes prefer their
-    resolved `_library` material's gloss/metallic (falling back to name heuristics only
-    when unresolved). Solid meshes are back-face culled (the whole car draws through an
-    X-mirror, so front faces are `GL_CW`); wheels, tires, and translucent surfaces are
-    marked double-sided. Meshes without usable UV3 fall back to
-    registered planar projection using the model scene, mask boundary, part metadata,
-    and locator landmarks. It uploads the selected preview LOD; and layer drag cursors.
-- `src/gui/widgets/` (`property_panel.*`, `layer_tree_view.*`,
-  `layer_state_delegate.*`, `color_palette_widget.*`, `shapes_browser_widget.*`,
-  `shape_geometry_store.*`, `shape_name_store.*`, `font_glyphs.*`,
-  `clipboard_buffer_widget.*`, `car_preview_widget.*`,
-  `header_metadata_widget.*`, `livery_section_bar.*`, `image_io.*`,
-  `image_preprocessor.*`, `image_preprocess_dialog.*`,
-  `import_locations.*`)
-  - `car_preview_widget`: the dockable 3D car preview `QOpenGLWidget` — orbit
-    camera, framebuffer thumbnail capture, its own scene/car renderers, and a configurable livery paint texture regenerated
-    from `EditorState` change signals. Imported `C_livery` sections are rendered into
-    isolated packed regions derived from `Masks.xml`; section axes are normalized in the
-    preview copy and sampling path without mutating decoded section/group transforms.
-    Its model preparation runs on a background worker and resolves each
-    exterior/wheel/tire mesh's shared `_library` material:
-    `resolveExteriorMaterials` merges the material defaults always and loads the
-    swatchbin textures only when the opt-in setting is on; `assignSharedSlotMaterials`
-    synthesizes a materialbin path for wheel slot names that carry none. Resolved
-    materials are flagged so the renderer prefers them over name heuristics.
-    Manufacturer paint selectors resolve through the loaded car's paint palette
-    and shared material tuning. Decoded
-    material defaults and native textures are held in bounded process-wide caches.
-  - Dockable panels and their support: property editing (single/multi/group/
-    guide, live color, numeric-label dragging, mixed values); contextual tool
-    controls in `tool_settings_widget.*`; the tree view with
-    drag/drop reordering and reparenting, row badges, and thumbnails; the
-    project-specific swatches panel; the shape browser with theme-aware previews,
-    categories, favorites, and insertion;
-    vector geometry loading and human-readable shape names
-    (`assets/vector/shape_names.json`, reparsed each launch); the shared font
-    glyph-block table (`font_glyphs.*`) mapping characters to font-letter shape
-    ids and merged browser sections, used by both the browser and the Place Text
-    tool; header editing; image decode (Qt plus Windows WIC) / guide-image encode /
-    accepted suffixes; and the label-based, edge-aware C++ guide preprocessing
-    engine plus its live-preview dialog.
-## Core Entry Points
+### Runtime assets
 
-- `readCGroupPayload()` / `writeCGroupFile()`
-- `getLayerData()`
-- `decodeGroup()` / `buildTree()` / `validateTree()` / `flattenGroup()`
-- `importCGroupFlat()` / `importCGroupNested()`
-- `importCLivery()` / `readLiveryPayload()` / `buildLiverySections()`
-- `buildLiveryGyvl()` / `encodeCLiveryPayload()` / `exportCLivery()`
-- `importFM2023Asset()` / `decodeFM2023RawGroup()` /
-  `readFM2023LiveryPayload()` / `decodeFM2023LiverySections()`
-- `buildFlatPayload()` / `buildNestedPayload()`
-- `exportFlatProjectFolder()` / `exportNestedProjectFolder()`
-- `projectToJson()` / `projectFromJson()` (scene-tree JSON; requires a `root` node)
-- `Project::root` (`scene::Group`, canonical runtime scene tree)
-- `scene::sceneTreeToJson()` / `scene::sceneTreeFromJson()`
-- `encodeProjectDocument()` / `decodeProjectDocument()` (`.3so` gzip container)
-- `parseHeader()` / `buildHeader()` / `defaultDraftHeader()`
-- `paintFinishTable()` / `PaintFinishLibrary::load()` / `findPaintFinish()`
-- `gameMediaDir()` / `gameCarsDir()` / `gamePaintMaterialsArchive()`
+The build deploys `assets/` beside the executable through a validated staging
+and replacement process. Deployment preserves the previous assets for recovery
+if publication fails. Geometry and fill catalogs must be deployed together.
+Restart the editor after repairing runtime assets loaded during initialization.
 
-## Privacy Policy Build Flag
+| Asset path | Role |
+| --- | --- |
+| `assets/vector/` | Native shape geometry and `shape_names.json` registry. |
+| `assets/raster/` | Packed raster decals. |
+| `assets/icons/` | Editor icons and cursors. |
+| `assets/cars/` | Car registry and preview metadata. |
+| `assets/compact_fit_shapes.json` | Compact Fit catalog and task membership. |
+| `assets/lining_shapes.json` | Lining catalog and normalized centerlines. |
 
-`FLS_PRIVACY_POLICY` defaults to `ON` for public builds. When enabled, imports
-reject locked payloads only: `C_group` byte `0x1D == 0x21` and `C_livery`
-little-endian `u32` at offset `0x08 == 1`. Published header metadata is not used as a
-denial signal because legitimate users may edit their own published items.
+Catalog changes are loaded per operation; see [configuration deployment](COMPACT_FIT_CONFIG.md#deployment).
+
+## Architecture
+
+CMake builds `fls_core` for codecs and scene data, `fls_profile_compute` for
+numeric fitting, and `fls_editor_ui` for the editor. `ForzaLiveryStudio` supplies
+the application entry point and links the UI library.
+
+### Scene and project state
+
+`Project::root` is the canonical `fls::scene::Group`. Groups own child layers;
+shapes and guides carry their visual content. Local transforms compose through
+the parent chain into world transforms. Vector content refers to native shape
+IDs; raster content holds decal or guide imagery. Saved figures retain editable
+Pen or Lining contours and participate in scene editing and project undo.
+
+`EditorState` owns the project and its indexes. The command dispatcher validates
+and commits edits, coordinates selection and history, and emits updates for the
+canvas, layer model, and preview. Reparenting preserves world placement through
+recalculated local transforms. Authored visibility is stored independently of
+active-section isolation.
+
+The `.3so` container is gzip-compressed scene-tree JSON, currently document
+version 4. Project serialization includes guides, figures, swatches, retained
+header data, and livery paint state. Autosave writes associated projects; locked
+per-instance scratch documents support crash recovery, including unsaved work.
+
+### Import and export
+
+Game codecs decode record streams into the shared scene representation.
+`VinylTreeDecoder` owns the common group and section walk; format profiles supply
+record dialect, framing, padding, and mask interpretation. Motorsport block
+compression is resolved before the shared decoder runs.
+
+Grouped export composes scene transforms while retaining nested groups and mask
+semantics. Livery export derives section occupancy from visible scene content
+and selects the destination's framing, header, paint layout, and compression.
+Figures and guides remain editor content. Native encodings can differ while
+representing equivalent scene geometry.
+
+PGS targets cover FH2–FH6, FM5–FM7, and Motorsport 2023. Destination-specific
+section and paint handling is specified in [native export profiles](CLIVERY.md#native-export-targets).
+FH5 WGS export replaces a registered destination slot through the transactional
+pipeline in [WGS.md](WGS.md).
+
+### Game resources and preview
+
+The configured game folder accepts either an installation root or its `media`
+directory. `game_paths.*` derives `media/Cars`, shared material archives under
+`Cars/_library/Materials.zip`, and textures under `Cars/_library/Textures.zip`.
+Painttype materials use the `_fmnext/usercustomizable/` archive prefix.
+
+Core decoders read `.modelbin` geometry and materials, assemble `.carbin` parts,
+extract zipped car folders, and decode `.swatchbin` textures and `LiveryMasks/`.
+Model preparation, material resolution, and enabled texture decoding run outside
+the UI thread. Shared material tuning is applied when resolved; native texture
+loading is an opt-in setting. Bounded caches retain decoded resources.
+
+The scene renderer rasterizes livery sections into isolated paint regions. The
+car shader maps transformed UV3 through the mask atlas into those regions;
+registered planar projection supplies coverage for geometry without usable UV3.
+Preview coordinate normalization operates on rendering data. Paint bindings,
+manufacturer colors, and finish materials drive paint shading. The preview
+remains a reference approximation of the game renderer.
+
+### Source map
+
+| Area | Responsibilities and primary files |
+| --- | --- |
+| `src/main.cpp` | Application startup. |
+| `src/core/` scene | `layer.*`, `visual_container.h`, `contour_data.h`, `scene_codec.*`, and `project_codec.*`: hierarchy, visual data, and project serialization. |
+| `src/core/` game formats | `cgroup_codec.*`, `livery_codec.*`, `fm_codec.*`, `vinyl_decoder.*`, `header_codec.*`, and `game_export.*`: import, native export, and metadata. |
+| `src/core/` resources | `model_*`, `car_scene.*`, `swatchbin.*`, `livery_masks.*`, `paint_finish_catalog.*`, and `game_paths.*`: preview resources and decoding. |
+| `src/gui/app/` | `main_window*`, settings, themes, asset lookup, application actions, and I/O coordination. |
+| `src/gui/state/` | `editor_state*`, `layer_tree_model.*`, and `scene_view.h`: commands, history, selection, clipboard, and scene views. |
+| `src/gui/canvas/` | `project_canvas*`, `canvas_tools.*`, `native_shape_renderer.*`, and `car_model_renderer.*`: interaction, hit testing, drawing, and preview projection. |
+| `src/gui/fill/` | Contour conversion, Pen and Lining fitting, Compact Fit, polygon meshing, and region generation. See [fill engines](FILL_ENGINES.md). |
+| `src/gui/widgets/` | Docks, properties, import/export dialogs, preview, image I/O, preprocessing, and shape stores. |
+| `tools/` | Build/deployment scripts, headless tests, asset generation, and optional inspection tools. |
+| `third_party/` | Vendored Clipper2 polygon engine and Potrace bitmap tracer. |
+
+### Core entry points
+
+| Task | Entry points |
+| --- | --- |
+| Group import | `readCGroupPayload()`, `importCGroupFlat()`, `importCGroupNested()` |
+| Livery import | `readLiveryPayload()`, `buildLiverySections()`, `importCLivery()` |
+| Motorsport import | `decodeFM2023RawGroup()`, `readFM2023LiveryPayload()`, `decodeFM2023LiverySections()`, `importFM2023Asset()` |
+| Group export | `buildFlatPayload()`, `buildNestedPayload()`, `exportFlatProjectFolder()`, `exportNestedProjectFolder()` |
+| Livery export | `buildLiveryGyvl()`, `encodeCLiveryPayload()`, `exportCLivery()` |
+| Project persistence | `projectToJson()`, `projectFromJson()`, `encodeProjectDocument()`, `decodeProjectDocument()` |
+| Headers | `parseHeader()`, `buildHeader()`, `defaultDraftHeader()` |
+| Preview resources | `gameMediaDir()`, `gameCarsDir()`, `PaintFinishLibrary::load()` |
+
+## Validation and diagnostics
+
+Enable tests after the normal configure step, then build and run the relevant
+CTest selection:
+
+```powershell
+cmake -S . -B build -DFLS_BUILD_TESTS=ON
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+`CMakeLists.txt` defines the available tests and fixture requirements. Local
+assets under `tests/` are optional and untracked; some reference checks are
+registered only when their fixtures exist at configuration time.
+
+Codec tests compare decoded geometry, masks, shape order, section membership,
+and project round trips. Native-reference checks distinguish byte equality from
+scene equivalence and normalize header identity/publication metadata. State and
+widget tests exercise commands, history, selection, and startup. Asset deployment
+checks cover staged replacement and release catalog completeness, with isolated
+working directories for source-fallback checks.
+
+Use the [fill diagnostics](FILL_ENGINES.md#diagnostics-and-replay) for contour
+requests, quality measurements, and catalog comparisons. Helper builds provide
+`fls_model_dump`, `fls_pack_decals`, and `fls_finish_dump`; the latter accepts
+`--library <gameFolder>` or `--material <file>`. GUI appearance and in-game
+acceptance require user verification.
