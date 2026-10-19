@@ -1024,10 +1024,15 @@ QByteArray siblingGroupTransformMarker(int previousGroupDepth) {
     return out;
 }
 
-QByteArray maybeFlipMaskFlag(QByteArray marker, bool previousShapeMask) {
+QByteArray liveryGroupTransformMarker(QByteArray marker, bool previousShapeMask,
+                                      bool previousWasGroup, bool nativeMarkers) {
+    if (nativeMarkers && !marker.isEmpty()) {
+        return QByteArray(1, previousShapeMask && !previousWasGroup ? '\x01' : '\0');
+    }
     if (previousShapeMask && !marker.isEmpty() && static_cast<quint8>(marker[0]) == 0x00) {
         marker[0] = '\x01';
     }
+
     return marker;
 }
 
@@ -1239,9 +1244,7 @@ QByteArray packLiveryGroup(const LiveryEntry &entry, const Matrix3 &parentWorld,
         localTransform = decomposeTransform2D(
             detail::multiply(invertAffine(parentWorld), groupWorld));
     }
-    QByteArray out = packLiveryGroupTransform(
-        localTransform, framing.nativeMarkers && !transformMarker.isEmpty()
-            ? QByteArray(1, '\0') : liveryTransformMarker(transformMarker));
+    QByteArray out = packLiveryGroupTransform(localTransform, liveryTransformMarker(transformMarker));
     out.append(localTransform.scaleX * localTransform.scaleY < 0.0
                    ? packMarkerlessGroupHeader(children, "livery group")
                    : packCountedGroupHeader(children, isMaskGroup, "livery group"));
@@ -1261,7 +1264,8 @@ QByteArray packLiveryGroup(const LiveryEntry &entry, const Matrix3 &parentWorld,
             } else {
                 marker = QByteArray("\x01", 1);
             }
-            marker = maybeFlipMaskFlag(marker, previousShapeMask);
+            marker = liveryGroupTransformMarker(marker, previousShapeMask,
+                                                previousWasGroup, framing.nativeMarkers);
             previousShapeMask = false;
             out.append(packLiveryGroup(
                 child, groupWorld,
@@ -1330,7 +1334,8 @@ void appendStructuralSection(QByteArray &body, const scene::Group *sectionGroup,
             } else {
                 marker = QByteArray();
             }
-            marker = maybeFlipMaskFlag(marker, previousShapeMask);
+            marker = liveryGroupTransformMarker(marker, previousShapeMask,
+                                                previousWasGroup, framing.nativeMarkers);
             previousShapeMask = false;
             body.append(packLiveryGroup(child, sectionWorld, 0, false, marker, false,
                                         previousShapeMask, worldAdjustment, sourceFrames, framing));

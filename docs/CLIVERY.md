@@ -108,6 +108,10 @@ shape or terminal group child, while inherited mask-group state remains
 authoritative. Every shape inheriting a `60` group carries an explicit `01 02`
 lead, including the group's first shape.
 
+Native group-transform state carries the preceding direct shape's mask bit.
+The encoder derives this bit from sibling mask state when selecting the
+destination record framing.
+
 For FH4, FH5, and FH6, a shape following a group begins with one state byte
 (`00` or `01`) followed by `02`. Counted group boundaries close the preceding
 nesting. The next shape record starts directly after the terminal child payload.

@@ -745,6 +745,39 @@ void compareComplexArtwork(const fls::Project &expected, const fls::Project &act
     }
 }
 
+void testHorizonLiveryShapeToGroupMasks(const QString &root) {
+    for (const auto game : {fls::ExportGameVersion::Horizon6, fls::ExportGameVersion::Horizon4,
+            fls::ExportGameVersion::Horizon5, fls::ExportGameVersion::Motorsport2023}) {
+        for (const bool nested : {false, true}) {
+            for (const bool masked : {false, true}) {
+                auto project = makeLivery(6);
+                auto &section = static_cast<fls::scene::Group &>(*project.root->children[2]);
+                section.children.clear();
+                auto container = std::make_unique<fls::scene::Group>();
+                auto first = makeShape(0);
+                first->color = {0, 0, 0, 255};
+                first->mask = masked;
+                auto following = std::make_unique<fls::scene::Group>();
+                following->append(makeShape(1));
+                following->append(makeShape(2));
+                auto &parent = nested ? *container : section;
+                parent.append(std::move(first));
+                parent.append(std::move(following));
+                if (nested) {
+                    section.append(std::move(container));
+                }
+                const QString label = QStringLiteral("shape-to-group-mask-%1-%2-%3")
+                    .arg(static_cast<int>(game)).arg(nested).arg(masked);
+                const QString folder = QDir(root).filePath(label);
+                fls::exportGameLivery(project, folder, game);
+                const auto imported = game == fls::ExportGameVersion::Motorsport2023
+                    ? fls::importFM2023Asset(folder) : fls::importCLivery(folder);
+                compareComplexArtwork(project, imported, label);
+            }
+        }
+    }
+}
+
 void testHorizonLiveryGroupBoundaries(const QString &root) {
     for (const auto game : {fls::ExportGameVersion::Horizon6, fls::ExportGameVersion::Horizon4,
             fls::ExportGameVersion::Horizon5}) {
@@ -986,6 +1019,8 @@ int main(int argc, char *argv[]) {
         testThinShearedArtwork(temporary.path());
         qInfo() << "Testing Horizon livery group boundaries";
         testHorizonLiveryGroupBoundaries(temporary.path());
+        qInfo() << "Testing livery shape-to-group masks";
+        testHorizonLiveryShapeToGroupMasks(temporary.path());
         qInfo() << "Testing generated groups";
         testGroups(temporary.path());
         qInfo() << "Testing discarded masks";
