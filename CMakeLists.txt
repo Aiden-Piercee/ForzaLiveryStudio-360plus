@@ -83,6 +83,10 @@ add_library(fls_core STATIC
     src/core/fls_core.h
     src/core/fm_codec.cpp
     src/core/fm_codec.h
+    src/core/fm4_codec.cpp
+    src/core/fm4_codec.h
+    src/core/fm4_crypto.cpp
+    src/core/fm4_crypto.h
     src/core/header_codec.cpp
     src/core/header_codec.h
     src/core/layer.cpp
@@ -212,6 +216,7 @@ qt_add_library(fls_editor_ui STATIC
     src/gui/app/main_window.h
     src/gui/app/main_window_internal.h
     src/gui/app/main_window_edit.cpp
+    src/gui/app/main_window_fm4.cpp
     src/gui/app/main_window_io.cpp
     src/gui/app/main_window_project.cpp
     src/gui/app/main_window_ui.cpp
@@ -540,6 +545,12 @@ if(FLS_BUILD_TESTS)
         COMMAND fls_livery_logo_encoder_tests --legacy-artwork)
     add_test(NAME livery_legacy_five_panel
         COMMAND fls_livery_logo_encoder_tests --legacy-five-panel)
+
+    add_executable(fls_fm4_codec_tests tools/fm4_codec_test.cpp)
+    target_link_libraries(fls_fm4_codec_tests PRIVATE fls_core Qt6::Core)
+    target_compile_definitions(fls_fm4_codec_tests PRIVATE
+        "FLS_FM4_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tools/fixtures/fm4\"")
+    add_test(NAME fm4_codec COMMAND fls_fm4_codec_tests)
 
     add_executable(fls_game_export_tests tools/game_export_test.cpp)
     target_link_libraries(fls_game_export_tests PRIVATE fls_core Qt6::Core)

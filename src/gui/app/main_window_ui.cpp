@@ -379,6 +379,11 @@ void MainWindow::setupFileMenu() {
     addIconEntry(QStringLiteral("MenuExportFlat.xpm"), QStringLiteral("&Export..."),
                  QStringLiteral("export"), QStringLiteral("Export"), &MainWindow::exportDialog);
     fileMenu->addSeparator();
+    addShortcutEntry(QStringLiteral("Import FM&4 Livery (.liv)..."), QStringLiteral("import_fm4_livery"),
+                     QStringLiteral("Import FM4 Livery"), &MainWindow::importFM4LiveryDialog);
+    addShortcutEntry(QStringLiteral("Export F&M4 Livery (.liv)..."), QStringLiteral("export_fm4_livery"),
+                     QStringLiteral("Export FM4 Livery"), &MainWindow::exportFM4LiveryDialog);
+    fileMenu->addSeparator();
     addIconEntry(QStringLiteral("MenuExit.xpm"), QStringLiteral("E&xit"),
                  QStringLiteral("exit"), QStringLiteral("Exit"), &QWidget::close);
 }

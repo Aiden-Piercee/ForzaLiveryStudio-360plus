@@ -99,6 +99,8 @@ private:
 
     void importFileDialog();
     void importGuideLayerDialog();
+    void importFM4LiveryDialog();
+    void exportFM4LiveryDialog();
     void preprocessSelectedGuide();
     void createRegions();
     void fillRegions();

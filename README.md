@@ -101,6 +101,7 @@ The import/export for groups is fully supported, core functionality in place. So
 | Motosport 6 | Import/Export  | Import/Export |
 | Horizon 2   | Import/Export  | Import/Export |
 | Motosport 5 | Import/Export  | Import/Export |
+| Motosport 4 | -              | Import/Export (`.liv`, see [FM4.md](docs/FM4.md)) |
 
 ## Documentation
 
@@ -109,6 +110,7 @@ The import/export for groups is fully supported, core functionality in place. So
 - [**C_group Binary Format**](docs/CGROUP.md) - technical reference for the vinyl group binary payload.
 - [**C_livery Binary Format**](docs/CLIVERY.md) - technical reference for the livery binary container and embedded groups.
 - [**Header File Format**](docs/HEADER.md) - structure of the Forza Horizon header metadata file.
+- [**Motorsport 4 livery format**](docs/FM4.md) - Xbox 360 `.liv` container and codec status.
 - [**TODO**](docs/TODO.md) - planned features and improvements.
 
 ## Q/A
