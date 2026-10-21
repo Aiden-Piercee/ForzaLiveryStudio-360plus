@@ -45,3 +45,11 @@ Header, trailers and tail of an imported file are kept, so an untouched file rou
   layers import and export with their ids intact but draw nothing.
 - Panel axis and rotation conventions follow the raw FM4 values; they still need an in-game check.
 - FM4 has no masks or raster logos; those layers are skipped on export and reported.
+
+## Other Xbox 360 titles (FM2, FM3, Horizon 1, Horizon 2 on 360)
+
+Not supported, because nothing about their save layout has been verified: there are no sample
+files and no documentation in the FM4 tool this was ported from. The importer only accepts `crlv`
+version 3 and reports the version it found otherwise, so another title's file is refused instead
+of being misread. FM4 is the only Xbox 360 title confirmed to match this format. To add the others,
+send an unmodified save per title (the `.liv` plus your `default.pe` and profile ID).

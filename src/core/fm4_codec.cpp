@@ -152,6 +152,14 @@ FM4Design parseFM4Design(const QByteArray &plain) {
     if (!isFM4DesignPlain(plain)) {
         throw std::runtime_error("not an FM4 livery design (missing crlv header)");
     }
+    // Only crlv version 3 (FM4) has been checked against real data. Other Xbox 360 titles
+    // (FM2, FM3, FH1, FH2) may use a different version or layout; refuse instead of misparsing.
+    const quint32 version = beU32(plain, 4);
+    if (version != 3) {
+        throw std::runtime_error(QStringLiteral("unsupported crlv version %1: only FM4 (version 3) is verified. "
+                                                "FM2, FM3 and Horizon 360 saves need sample files first")
+                                     .arg(version).toStdString());
+    }
     FM4Design design;
     design.head = plain.left(kHeadSize);
     design.carId = beU32(plain, kCarIdPos);
